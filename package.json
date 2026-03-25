@@ -1,0 +1,8 @@
+{
+  "name": "chatgpt-question-navigator-stable",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-userscript.mjs"
+  }
+}
