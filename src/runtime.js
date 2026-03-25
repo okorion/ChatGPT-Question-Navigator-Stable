@@ -20,6 +20,17 @@
     scanAndRender(reason);
   }, 350);
 
+  function queueSettledScan(reason, delay = 1200, { reobserve = false } = {}) {
+    clearTimeout(state.scanTimer);
+    state.scanTimer = setTimeout(() => {
+      state.scanTimer = null;
+      if (reobserve) {
+        observeConversation();
+      }
+      scanAndRender(reason);
+    }, delay);
+  }
+
   function observeConversation() {
     if (state.observer) {
       state.observer.disconnect();
@@ -49,6 +60,7 @@
 
       if (shouldScan) {
         debouncedScan('mutation');
+        queueSettledScan('mutation-settled');
       }
     });
 
@@ -61,11 +73,17 @@
   function watchUrlChanges() {
     setInterval(() => {
       if (location.href !== state.lastUrl) {
+        clearTimeout(state.scanTimer);
+        state.scanTimer = null;
+        clearTimeout(state.activeTimer);
+        state.activeTimer = null;
         state.lastUrl = location.href;
         state.activeId = null;
         state.listScrollTop = 0;
         setTimeout(() => {
           scanAndRender('url-change');
+          observeConversation();
+          queueSettledScan('url-change-settled', 1200, { reobserve: true });
         }, 450);
       }
     }, 800);

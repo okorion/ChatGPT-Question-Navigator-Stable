@@ -1,3 +1,11 @@
+  function holdActiveSelection() {
+    clearTimeout(state.activeTimer);
+    state.activeTimer = setTimeout(() => {
+      state.activeTimer = null;
+      updateActiveByViewport();
+    }, 650);
+  }
+
   function flashTarget(node) {
     if (!(node instanceof HTMLElement)) return;
 
@@ -11,6 +19,8 @@
     node.style.outlineOffset = '4px';
     node.style.background = 'rgba(255,255,255,0.06)';
 
+    holdActiveSelection();
+
     setTimeout(() => {
       node.style.transition = prevTransition;
       node.style.outline = prevOutline;
@@ -21,6 +31,7 @@
 
   function updateActiveByViewport() {
     if (!state.items.length) return;
+    if (state.activeTimer) return;
 
     const currentY = window.scrollY + window.innerHeight * 0.28;
     let active = state.items[0];
