@@ -12,7 +12,8 @@
   }
 
   function getUserRoleNodes() {
-    return Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
+    const root = getConversationRoot();
+    return Array.from(root.querySelectorAll('[data-message-author-role="user"]'));
   }
 
   function getTargetContainer(roleNode) {
@@ -21,6 +22,7 @@
     return (
       roleNode.closest('article') ||
       roleNode.closest('[data-testid^="conversation-turn-"]') ||
+      roleNode.closest('[data-message-id]') ||
       roleNode.closest('[class*="conversation-turn"]') ||
       roleNode
     );
@@ -32,31 +34,39 @@
     const cloned = roleNode.cloneNode(true);
 
     cloned.querySelectorAll(
-      'button, svg, img, video, audio, nav, form, textarea, input, select, style, script'
+      'button, svg, img, video, audio, nav, form, textarea, input, select, style, script, template, [hidden], [aria-hidden="true"]'
     ).forEach((n) => n.remove());
 
     return normalizeText(cloned.textContent || '');
   }
 
+  function buildItemDedupKey(text, top) {
+    return `${Math.round(top)}:${text.slice(0, 200)}`;
+  }
+
   function collectItems() {
     const roleNodes = getUserRoleNodes();
-    const seenText = new Set();
+    const seenTargets = new WeakSet();
+    const seenKeys = new Set();
     const items = [];
 
     for (const roleNode of roleNodes) {
       const targetNode = getTargetContainer(roleNode);
       if (!targetNode) continue;
+      if (!targetNode.isConnected) continue;
+      if (seenTargets.has(targetNode)) continue;
 
       const text = extractUserText(roleNode);
       if (!text || text.length < 2) continue;
 
-      const dedupeKey = text.slice(0, 200);
-      if (seenText.has(dedupeKey)) continue;
-      seenText.add(dedupeKey);
+      const top = targetNode.getBoundingClientRect().top + window.scrollY;
+      const dedupeKey = buildItemDedupKey(text, top);
+      if (seenKeys.has(dedupeKey)) continue;
+
+      seenTargets.add(targetNode);
+      seenKeys.add(dedupeKey);
 
       const id = getOrAssignNodeId(targetNode);
-      const top = targetNode.getBoundingClientRect().top + window.scrollY;
-
       items.push({
         id,
         text,
