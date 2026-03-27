@@ -65,6 +65,26 @@
 
 ---
 
+## 🧪 개발 워크플로
+
+- 실제 수정 대상 소스는 `src/` 디렉터리입니다.
+- 배포용 userscript 파일인 `ChatGPT_Question_Navigator_Stable.js`는 생성 파일이므로 직접 수정하지 않습니다.
+- 소스를 수정한 뒤 아래 명령으로 userscript를 다시 생성합니다.
+
+```bash
+npm run build
+```
+
+- PowerShell 실행 정책 때문에 `npm run build`가 막히는 환경에서는 아래 명령을 사용합니다.
+
+```bash
+node scripts/build-userscript.mjs
+```
+
+- 병렬 작업 시에는 각 lane이 자신의 `src/*.js` 파일만 수정하고, 루트 userscript와 `README.md`, `package.json`, `scripts/build-userscript.mjs`는 순차적으로만 갱신하는 것을 권장합니다.
+
+---
+
 ## 📄 라이선스
 
 MIT License
