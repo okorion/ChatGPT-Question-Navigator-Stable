@@ -143,7 +143,8 @@
   }
 
   function getUserRoleNodes() {
-    return Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
+    const root = getConversationRoot();
+    return Array.from(root.querySelectorAll('[data-message-author-role="user"]'));
   }
 
   function getTargetContainer(roleNode) {
@@ -152,6 +153,7 @@
     return (
       roleNode.closest('article') ||
       roleNode.closest('[data-testid^="conversation-turn-"]') ||
+      roleNode.closest('[data-message-id]') ||
       roleNode.closest('[class*="conversation-turn"]') ||
       roleNode
     );
@@ -163,31 +165,39 @@
     const cloned = roleNode.cloneNode(true);
 
     cloned.querySelectorAll(
-      'button, svg, img, video, audio, nav, form, textarea, input, select, style, script'
+      'button, svg, img, video, audio, nav, form, textarea, input, select, style, script, template, [hidden], [aria-hidden="true"]'
     ).forEach((n) => n.remove());
 
     return normalizeText(cloned.textContent || '');
   }
 
+  function buildItemDedupKey(text, top) {
+    return `${Math.round(top)}:${text.slice(0, 200)}`;
+  }
+
   function collectItems() {
     const roleNodes = getUserRoleNodes();
-    const seenText = new Set();
+    const seenTargets = new WeakSet();
+    const seenKeys = new Set();
     const items = [];
 
     for (const roleNode of roleNodes) {
       const targetNode = getTargetContainer(roleNode);
       if (!targetNode) continue;
+      if (!targetNode.isConnected) continue;
+      if (seenTargets.has(targetNode)) continue;
 
       const text = extractUserText(roleNode);
       if (!text || text.length < 2) continue;
 
-      const dedupeKey = text.slice(0, 200);
-      if (seenText.has(dedupeKey)) continue;
-      seenText.add(dedupeKey);
+      const top = targetNode.getBoundingClientRect().top + window.scrollY;
+      const dedupeKey = buildItemDedupKey(text, top);
+      if (seenKeys.has(dedupeKey)) continue;
+
+      seenTargets.add(targetNode);
+      seenKeys.add(dedupeKey);
 
       const id = getOrAssignNodeId(targetNode);
-      const top = targetNode.getBoundingClientRect().top + window.scrollY;
-
       items.push({
         id,
         text,
@@ -217,6 +227,7 @@
     toggle.type = 'button';
     toggle.textContent = 'Q';
     toggle.title = '질문 네비게이션 열기/닫기';
+    toggle.setAttribute('aria-label', '질문 네비게이션 열기 또는 닫기');
     Object.assign(toggle.style, {
       position: 'fixed',
       right: '16px',
@@ -230,6 +241,7 @@
       color: '#fff',
       cursor: 'pointer',
       fontSize: '18px',
+      lineHeight: '1',
       boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
       backdropFilter: 'blur(10px)',
     });
@@ -253,7 +265,7 @@
       position: 'fixed',
       top: '16px',
       right: '16px',
-      width: '320px',
+      width: 'min(360px, calc(100vw - 32px))',
       height: 'calc(100vh - 32px)',
       zIndex: '2147483646',
       pointerEvents: 'auto',
@@ -345,8 +357,14 @@
           border-bottom: 1px solid rgba(255,255,255,0.08);
         }
 
+        .searchRow {
+          display: flex;
+          gap: 8px;
+        }
+
         .search {
           width: 100%;
+          min-width: 0;
           border-radius: 10px;
           border: 1px solid rgba(255,255,255,0.10);
           background: rgba(255,255,255,0.06);
@@ -358,6 +376,12 @@
 
         .search::placeholder {
           color: rgba(255,255,255,0.48);
+        }
+
+        .clearBtn {
+          flex: 0 0 auto;
+          padding-inline: 12px;
+          white-space: nowrap;
         }
 
         .list {
@@ -417,6 +441,13 @@
           font-size: 11px;
           color: rgba(255,255,255,0.45);
         }
+
+        .btn:focus-visible,
+        .item:focus-visible,
+        .search:focus-visible {
+          outline: 2px solid rgba(255,255,255,0.55);
+          outline-offset: 2px;
+        }
       </style>
 
       <div class="app">
@@ -428,7 +459,10 @@
           </div>
         </div>
         <div class="searchWrap">
-          <input class="search" id="searchInput" type="text" placeholder="질문 검색" />
+          <div class="searchRow">
+            <input class="search" id="searchInput" type="text" placeholder="질문 검색" aria-label="질문 검색" />
+            <button class="btn clearBtn hidden" id="clearSearchBtn" type="button">지우기</button>
+          </div>
         </div>
         <div class="list" id="list"></div>
         <div class="footer" id="footer">0개 질문</div>
@@ -440,11 +474,17 @@
       refreshBtn: state.shadow.getElementById('refreshBtn'),
       hideBtn: state.shadow.getElementById('hideBtn'),
       searchInput: state.shadow.getElementById('searchInput'),
+      clearSearchBtn: state.shadow.getElementById('clearSearchBtn'),
       list: state.shadow.getElementById('list'),
       footer: state.shadow.getElementById('footer'),
     };
 
     state.els = els;
+
+    const syncSearchUi = () => {
+      const hasQuery = Boolean(normalizeText(state.query));
+      els.clearSearchBtn.classList.toggle('hidden', !hasQuery);
+    };
 
     els.hideBtn.addEventListener('click', () => {
       state.collapsed = true;
@@ -459,7 +499,17 @@
     els.searchInput.addEventListener('input', (e) => {
       state.query = e.target.value || '';
       state.listScrollTop = 0;
+      syncSearchUi();
       renderList('search');
+    });
+
+    els.clearSearchBtn.addEventListener('click', () => {
+      state.query = '';
+      state.listScrollTop = 0;
+      els.searchInput.value = '';
+      syncSearchUi();
+      renderList('search');
+      els.searchInput.focus();
     });
 
     const markInteracting = () => {
@@ -482,6 +532,8 @@
 
     els.list.addEventListener('wheel', markInteracting, { passive: true });
     els.list.addEventListener('touchmove', markInteracting, { passive: true });
+
+    syncSearchUi();
   }
 
   function applyCollapsedState() {
@@ -502,8 +554,17 @@
     const list = state.els.list;
     const footer = state.els.footer;
     const prevScrollTop = reason === 'search' ? 0 : state.listScrollTop;
+    const hasActiveQuery = Boolean(normalizeText(state.query));
 
     state.filteredItems = filterItems(state.items, state.query);
+
+    if (state.els.clearSearchBtn) {
+      state.els.clearSearchBtn.classList.toggle('hidden', !hasActiveQuery);
+    }
+
+    const emptyMessage = state.items.length
+      ? '검색 결과가 없습니다'
+      : '표시할 사용자 질문이 없습니다';
 
     const html = state.filteredItems.length
       ? state.filteredItems.map((item, idx) => `
@@ -512,7 +573,7 @@
             <div class="text">${escapeHtml(item.preview)}</div>
           </button>
         `).join('')
-      : `<div class="empty">표시할 사용자 질문이 없음</div>`;
+      : `<div class="empty">${emptyMessage}</div>`;
 
     list.innerHTML = html;
 
@@ -529,7 +590,9 @@
       });
     });
 
-    footer.textContent = `${state.filteredItems.length}개 질문`;
+    footer.textContent = hasActiveQuery
+      ? `검색 결과 ${state.filteredItems.length} / 전체 ${state.items.length}`
+      : `${state.filteredItems.length}개 질문`;
 
     list.scrollTop = prevScrollTop;
     state.listScrollTop = list.scrollTop;
@@ -542,6 +605,14 @@
       const id = btn.getAttribute('data-id');
       btn.classList.toggle('active', id === state.activeId);
     });
+  }
+
+  function holdActiveSelection() {
+    clearTimeout(state.activeTimer);
+    state.activeTimer = setTimeout(() => {
+      state.activeTimer = null;
+      updateActiveByViewport();
+    }, 650);
   }
 
   function flashTarget(node) {
@@ -557,6 +628,8 @@
     node.style.outlineOffset = '4px';
     node.style.background = 'rgba(255,255,255,0.06)';
 
+    holdActiveSelection();
+
     setTimeout(() => {
       node.style.transition = prevTransition;
       node.style.outline = prevOutline;
@@ -567,6 +640,7 @@
 
   function updateActiveByViewport() {
     if (!state.items.length) return;
+    if (state.activeTimer) return;
 
     const currentY = window.scrollY + window.innerHeight * 0.28;
     let active = state.items[0];
@@ -606,6 +680,42 @@
     scanAndRender(reason);
   }, 350);
 
+  let mutationSettledTimer = null;
+  let urlSettledTimer = null;
+
+  function clearSettledScan(timerKey) {
+    if (timerKey === 'url-change') {
+      clearTimeout(urlSettledTimer);
+      urlSettledTimer = null;
+      return;
+    }
+
+    clearTimeout(mutationSettledTimer);
+    mutationSettledTimer = null;
+  }
+
+  function queueSettledScan(reason, delay = 1200, { reobserve = false, timerKey = 'mutation' } = {}) {
+    clearSettledScan(timerKey);
+
+    const timerId = setTimeout(() => {
+      if (timerKey === 'url-change') {
+        urlSettledTimer = null;
+      } else {
+        mutationSettledTimer = null;
+      }
+      if (reobserve) {
+        observeConversation();
+      }
+      scanAndRender(reason);
+    }, delay);
+
+    if (timerKey === 'url-change') {
+      urlSettledTimer = timerId;
+    } else {
+      mutationSettledTimer = timerId;
+    }
+  }
+
   function observeConversation() {
     if (state.observer) {
       state.observer.disconnect();
@@ -635,6 +745,7 @@
 
       if (shouldScan) {
         debouncedScan('mutation');
+        queueSettledScan('mutation-settled');
       }
     });
 
@@ -647,11 +758,20 @@
   function watchUrlChanges() {
     setInterval(() => {
       if (location.href !== state.lastUrl) {
+        clearSettledScan('mutation');
+        clearSettledScan('url-change');
+        clearTimeout(state.activeTimer);
+        state.activeTimer = null;
         state.lastUrl = location.href;
         state.activeId = null;
         state.listScrollTop = 0;
         setTimeout(() => {
           scanAndRender('url-change');
+          observeConversation();
+          queueSettledScan('url-change-settled', 1200, {
+            reobserve: true,
+            timerKey: 'url-change',
+          });
         }, 450);
       }
     }, 800);
