@@ -14,6 +14,7 @@
     toggle.type = 'button';
     toggle.textContent = 'Q';
     toggle.title = '질문 네비게이션 열기/닫기';
+    toggle.setAttribute('aria-label', '질문 네비게이션 열기 또는 닫기');
     Object.assign(toggle.style, {
       position: 'fixed',
       right: '16px',
@@ -27,6 +28,7 @@
       color: '#fff',
       cursor: 'pointer',
       fontSize: '18px',
+      lineHeight: '1',
       boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
       backdropFilter: 'blur(10px)',
     });
@@ -50,7 +52,7 @@
       position: 'fixed',
       top: '16px',
       right: '16px',
-      width: '320px',
+      width: 'min(360px, calc(100vw - 32px))',
       height: 'calc(100vh - 32px)',
       zIndex: '2147483646',
       pointerEvents: 'auto',
@@ -142,8 +144,14 @@
           border-bottom: 1px solid rgba(255,255,255,0.08);
         }
 
+        .searchRow {
+          display: flex;
+          gap: 8px;
+        }
+
         .search {
           width: 100%;
+          min-width: 0;
           border-radius: 10px;
           border: 1px solid rgba(255,255,255,0.10);
           background: rgba(255,255,255,0.06);
@@ -155,6 +163,12 @@
 
         .search::placeholder {
           color: rgba(255,255,255,0.48);
+        }
+
+        .clearBtn {
+          flex: 0 0 auto;
+          padding-inline: 12px;
+          white-space: nowrap;
         }
 
         .list {
@@ -214,6 +228,13 @@
           font-size: 11px;
           color: rgba(255,255,255,0.45);
         }
+
+        .btn:focus-visible,
+        .item:focus-visible,
+        .search:focus-visible {
+          outline: 2px solid rgba(255,255,255,0.55);
+          outline-offset: 2px;
+        }
       </style>
 
       <div class="app">
@@ -225,7 +246,10 @@
           </div>
         </div>
         <div class="searchWrap">
-          <input class="search" id="searchInput" type="text" placeholder="질문 검색" />
+          <div class="searchRow">
+            <input class="search" id="searchInput" type="text" placeholder="질문 검색" aria-label="질문 검색" />
+            <button class="btn clearBtn hidden" id="clearSearchBtn" type="button">지우기</button>
+          </div>
         </div>
         <div class="list" id="list"></div>
         <div class="footer" id="footer">0개 질문</div>
@@ -237,11 +261,17 @@
       refreshBtn: state.shadow.getElementById('refreshBtn'),
       hideBtn: state.shadow.getElementById('hideBtn'),
       searchInput: state.shadow.getElementById('searchInput'),
+      clearSearchBtn: state.shadow.getElementById('clearSearchBtn'),
       list: state.shadow.getElementById('list'),
       footer: state.shadow.getElementById('footer'),
     };
 
     state.els = els;
+
+    const syncSearchUi = () => {
+      const hasQuery = Boolean(normalizeText(state.query));
+      els.clearSearchBtn.classList.toggle('hidden', !hasQuery);
+    };
 
     els.hideBtn.addEventListener('click', () => {
       state.collapsed = true;
@@ -256,7 +286,17 @@
     els.searchInput.addEventListener('input', (e) => {
       state.query = e.target.value || '';
       state.listScrollTop = 0;
+      syncSearchUi();
       renderList('search');
+    });
+
+    els.clearSearchBtn.addEventListener('click', () => {
+      state.query = '';
+      state.listScrollTop = 0;
+      els.searchInput.value = '';
+      syncSearchUi();
+      renderList('search');
+      els.searchInput.focus();
     });
 
     const markInteracting = () => {
@@ -279,6 +319,8 @@
 
     els.list.addEventListener('wheel', markInteracting, { passive: true });
     els.list.addEventListener('touchmove', markInteracting, { passive: true });
+
+    syncSearchUi();
   }
 
   function applyCollapsedState() {
@@ -299,8 +341,17 @@
     const list = state.els.list;
     const footer = state.els.footer;
     const prevScrollTop = reason === 'search' ? 0 : state.listScrollTop;
+    const hasActiveQuery = Boolean(normalizeText(state.query));
 
     state.filteredItems = filterItems(state.items, state.query);
+
+    if (state.els.clearSearchBtn) {
+      state.els.clearSearchBtn.classList.toggle('hidden', !hasActiveQuery);
+    }
+
+    const emptyMessage = state.items.length
+      ? '검색 결과가 없습니다'
+      : '표시할 사용자 질문이 없습니다';
 
     const html = state.filteredItems.length
       ? state.filteredItems.map((item, idx) => `
@@ -309,7 +360,7 @@
             <div class="text">${escapeHtml(item.preview)}</div>
           </button>
         `).join('')
-      : `<div class="empty">표시할 사용자 질문이 없음</div>`;
+      : `<div class="empty">${emptyMessage}</div>`;
 
     list.innerHTML = html;
 
@@ -326,7 +377,9 @@
       });
     });
 
-    footer.textContent = `${state.filteredItems.length}개 질문`;
+    footer.textContent = hasActiveQuery
+      ? `검색 결과 ${state.filteredItems.length} / 전체 ${state.items.length}`
+      : `${state.filteredItems.length}개 질문`;
 
     list.scrollTop = prevScrollTop;
     state.listScrollTop = list.scrollTop;
