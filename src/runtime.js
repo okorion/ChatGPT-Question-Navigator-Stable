@@ -20,15 +20,40 @@
     scanAndRender(reason);
   }, 350);
 
-  function queueSettledScan(reason, delay = 1200, { reobserve = false } = {}) {
-    clearTimeout(state.scanTimer);
-    state.scanTimer = setTimeout(() => {
-      state.scanTimer = null;
+  let mutationSettledTimer = null;
+  let urlSettledTimer = null;
+
+  function clearSettledScan(timerKey) {
+    if (timerKey === 'url-change') {
+      clearTimeout(urlSettledTimer);
+      urlSettledTimer = null;
+      return;
+    }
+
+    clearTimeout(mutationSettledTimer);
+    mutationSettledTimer = null;
+  }
+
+  function queueSettledScan(reason, delay = 1200, { reobserve = false, timerKey = 'mutation' } = {}) {
+    clearSettledScan(timerKey);
+
+    const timerId = setTimeout(() => {
+      if (timerKey === 'url-change') {
+        urlSettledTimer = null;
+      } else {
+        mutationSettledTimer = null;
+      }
       if (reobserve) {
         observeConversation();
       }
       scanAndRender(reason);
     }, delay);
+
+    if (timerKey === 'url-change') {
+      urlSettledTimer = timerId;
+    } else {
+      mutationSettledTimer = timerId;
+    }
   }
 
   function observeConversation() {
@@ -73,8 +98,8 @@
   function watchUrlChanges() {
     setInterval(() => {
       if (location.href !== state.lastUrl) {
-        clearTimeout(state.scanTimer);
-        state.scanTimer = null;
+        clearSettledScan('mutation');
+        clearSettledScan('url-change');
         clearTimeout(state.activeTimer);
         state.activeTimer = null;
         state.lastUrl = location.href;
@@ -83,7 +108,10 @@
         setTimeout(() => {
           scanAndRender('url-change');
           observeConversation();
-          queueSettledScan('url-change-settled', 1200, { reobserve: true });
+          queueSettledScan('url-change-settled', 1200, {
+            reobserve: true,
+            timerKey: 'url-change',
+          });
         }, 450);
       }
     }, 800);
