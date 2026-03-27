@@ -20,6 +20,42 @@
     scanAndRender(reason);
   }, 350);
 
+  let mutationSettledTimer = null;
+  let urlSettledTimer = null;
+
+  function clearSettledScan(timerKey) {
+    if (timerKey === 'url-change') {
+      clearTimeout(urlSettledTimer);
+      urlSettledTimer = null;
+      return;
+    }
+
+    clearTimeout(mutationSettledTimer);
+    mutationSettledTimer = null;
+  }
+
+  function queueSettledScan(reason, delay = 1200, { reobserve = false, timerKey = 'mutation' } = {}) {
+    clearSettledScan(timerKey);
+
+    const timerId = setTimeout(() => {
+      if (timerKey === 'url-change') {
+        urlSettledTimer = null;
+      } else {
+        mutationSettledTimer = null;
+      }
+      if (reobserve) {
+        observeConversation();
+      }
+      scanAndRender(reason);
+    }, delay);
+
+    if (timerKey === 'url-change') {
+      urlSettledTimer = timerId;
+    } else {
+      mutationSettledTimer = timerId;
+    }
+  }
+
   function observeConversation() {
     if (state.observer) {
       state.observer.disconnect();
@@ -49,6 +85,7 @@
 
       if (shouldScan) {
         debouncedScan('mutation');
+        queueSettledScan('mutation-settled');
       }
     });
 
@@ -61,11 +98,20 @@
   function watchUrlChanges() {
     setInterval(() => {
       if (location.href !== state.lastUrl) {
+        clearSettledScan('mutation');
+        clearSettledScan('url-change');
+        clearTimeout(state.activeTimer);
+        state.activeTimer = null;
         state.lastUrl = location.href;
         state.activeId = null;
         state.listScrollTop = 0;
         setTimeout(() => {
           scanAndRender('url-change');
+          observeConversation();
+          queueSettledScan('url-change-settled', 1200, {
+            reobserve: true,
+            timerKey: 'url-change',
+          });
         }, 450);
       }
     }, 800);
