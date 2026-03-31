@@ -36,8 +36,6 @@
     scanTimer: null,
     interactionTimer: null,
     activeTimer: null,
-    nodeIdMap: new WeakMap(),
-    idCounter: 0,
   };
 
   function log(...args) {
@@ -110,28 +108,29 @@
     return clean.slice(0, maxLen - 1) + '…';
   }
 
-  function getOrAssignNodeId(node) {
-    if (state.nodeIdMap.has(node)) {
-      return state.nodeIdMap.get(node);
-    }
-    const id = `qnav-${++state.idCounter}`;
-    state.nodeIdMap.set(node, id);
-    return id;
-  }
-
   function buildSignature(items) {
-    return items.map((item) => `${item.id}:${item.preview}`).join('|');
+    return items
+      .map((item) => [
+        item.id,
+        item.preview,
+        item.hasImage ? '1' : '0',
+        item.answerId || '',
+        item.answerPreview || '',
+      ].join(':'))
+      .join('|');
   }
 
   function filterItems(items, query) {
     const q = normalizeText(query).toLowerCase();
     if (!q) return items.slice();
-    return items.filter((item) => item.text.toLowerCase().includes(q));
+    return items.filter((item) => (item.searchText || item.text || '').toLowerCase().includes(q));
   }
 
   function getConversationRoot() {
     return document.querySelector('main') || document.body;
   }
+  const DOM_NODE_ID_ATTR = 'data-cgpt-qnav-id';
+  let domNodeIdCounter = 0;
 
   function isInsideOurUI(node) {
     const host = document.getElementById(HOST_ID);
@@ -142,9 +141,9 @@
     );
   }
 
-  function getUserRoleNodes() {
+  function getRoleNodes() {
     const root = getConversationRoot();
-    return Array.from(root.querySelectorAll('[data-message-author-role="user"]'));
+    return Array.from(root.querySelectorAll('[data-message-author-role]'));
   }
 
   function getTargetContainer(roleNode) {
@@ -159,16 +158,121 @@
     );
   }
 
-  function extractUserText(roleNode) {
-    if (!(roleNode instanceof HTMLElement)) return '';
+  function cloneRoleNode(roleNode, { removeImages = false } = {}) {
+    if (!(roleNode instanceof HTMLElement)) return null;
 
     const cloned = roleNode.cloneNode(true);
 
-    cloned.querySelectorAll(
-      'button, svg, img, video, audio, nav, form, textarea, input, select, style, script, template, [hidden], [aria-hidden="true"]'
-    ).forEach((n) => n.remove());
+    const removeSelectors = [
+      'button',
+      'svg',
+      'video',
+      'audio',
+      'nav',
+      'form',
+      'textarea',
+      'input',
+      'select',
+      'style',
+      'script',
+      'template',
+      '[hidden]',
+      '[aria-hidden="true"]',
+    ];
 
-    return normalizeText(cloned.textContent || '');
+    if (removeImages) {
+      removeSelectors.push('img');
+    }
+
+    cloned.querySelectorAll(removeSelectors.join(', ')).forEach((n) => n.remove());
+
+    return cloned;
+  }
+
+  function readNodeText(node) {
+    if (!(node instanceof HTMLElement)) return '';
+
+    node.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+    return String(node.innerText || node.textContent || '');
+  }
+
+  function normalizeDomText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function makeDomPreview(text, maxLen = 90) {
+    const clean = normalizeDomText(text);
+    if (clean.length <= maxLen) return clean;
+    return clean.slice(0, maxLen - 1) + '…';
+  }
+
+  function getOrAssignDomNodeId(node) {
+    if (!(node instanceof HTMLElement)) return '';
+
+    const existingId = node.getAttribute(DOM_NODE_ID_ATTR);
+    if (existingId) {
+      return existingId;
+    }
+
+    const id = `qnav-${++domNodeIdCounter}`;
+    node.setAttribute(DOM_NODE_ID_ATTR, id);
+    return id;
+  }
+
+  function buildQuestionPreview(text, hasImage, maxLen = 90) {
+    const clean = normalizeDomText(text);
+    if (!hasImage) return makeDomPreview(clean, maxLen);
+    if (!clean) return '(이미지)';
+
+    const suffix = ' (이미지)';
+    if (clean.length + suffix.length <= maxLen) {
+      return clean + suffix;
+    }
+
+    const headMaxLen = Math.max(1, maxLen - suffix.length - 1);
+    return clean.slice(0, headMaxLen) + '…' + suffix;
+  }
+
+  function pickFirstMeaningfulLine(text) {
+    const raw = String(text || '');
+    const firstLine = raw
+      .split(/\r?\n/)
+      .map((line) => normalizeDomText(line))
+      .find(Boolean);
+
+    return firstLine || normalizeDomText(raw);
+  }
+
+  function extractRoleText(roleNode, { removeImages = false, firstLineOnly = false } = {}) {
+    const cloned = cloneRoleNode(roleNode, { removeImages });
+    const rawText = readNodeText(cloned);
+
+    return firstLineOnly ? pickFirstMeaningfulLine(rawText) : normalizeDomText(rawText);
+  }
+
+  function messageHasImage(roleNode) {
+    if (!(roleNode instanceof HTMLElement)) return false;
+
+    const imageNode = roleNode.querySelector('img');
+    return imageNode !== null;
+  }
+
+  function buildSearchText(text, hasImage, answerPreview = '') {
+    const parts = [];
+    const cleanText = normalizeDomText(text);
+
+    if (cleanText) {
+      parts.push(cleanText);
+    }
+
+    if (hasImage) {
+      parts.push('(이미지)');
+      if (answerPreview) {
+        parts.push(answerPreview);
+      }
+    }
+
+    return normalizeDomText(parts.join(' '));
   }
 
   function buildItemDedupKey(text, top) {
@@ -176,35 +280,70 @@
   }
 
   function collectItems() {
-    const roleNodes = getUserRoleNodes();
-    const seenTargets = new WeakSet();
+    const roleNodes = getRoleNodes();
+    const seenRoleTargets = new Set();
     const seenKeys = new Set();
     const items = [];
+    let pendingItem = null;
 
     for (const roleNode of roleNodes) {
+      const role = roleNode.getAttribute('data-message-author-role');
+      if (role !== 'user' && role !== 'assistant') continue;
+
       const targetNode = getTargetContainer(roleNode);
       if (!targetNode) continue;
       if (!targetNode.isConnected) continue;
-      if (seenTargets.has(targetNode)) continue;
 
-      const text = extractUserText(roleNode);
-      if (!text || text.length < 2) continue;
+      const targetId = getOrAssignDomNodeId(targetNode);
+      const roleTargetKey = `${role}:${targetId}`;
+      if (seenRoleTargets.has(roleTargetKey)) continue;
+      seenRoleTargets.add(roleTargetKey);
+
+      if (role === 'assistant') {
+        if (!pendingItem || pendingItem.answerNode) continue;
+
+        const answerText = extractRoleText(roleNode, { removeImages: true });
+        const answerPreview = answerText ? makeDomPreview(pickFirstMeaningfulLine(answerText)) : '';
+
+        pendingItem.answerNode = targetNode;
+        pendingItem.answerId = targetId;
+        pendingItem.answerPreview = answerPreview;
+        pendingItem.searchText = buildSearchText(
+          pendingItem.text,
+          pendingItem.hasImage,
+          pendingItem.answerPreview
+        );
+        continue;
+      }
+
+      const hasImage = messageHasImage(roleNode);
+      const text = extractRoleText(roleNode, { removeImages: true });
+      if (!hasImage && (!text || text.length < 2)) continue;
 
       const top = targetNode.getBoundingClientRect().top + window.scrollY;
-      const dedupeKey = buildItemDedupKey(text, top);
-      if (seenKeys.has(dedupeKey)) continue;
+      const preview = buildQuestionPreview(text, hasImage);
+      const dedupeKey = buildItemDedupKey(preview || text || '(이미지)', top);
+      if (seenKeys.has(dedupeKey)) {
+        pendingItem = items[items.length - 1] || pendingItem;
+        continue;
+      }
 
-      seenTargets.add(targetNode);
-      seenKeys.add(dedupeKey);
-
-      const id = getOrAssignNodeId(targetNode);
-      items.push({
-        id,
+      const item = {
+        id: targetId,
         text,
-        preview: makePreview(text),
+        preview,
         node: targetNode,
         top,
-      });
+        hasImage,
+        answerNode: null,
+        answerId: '',
+        answerPreview: '',
+        searchText: buildSearchText(text, hasImage),
+      };
+
+      seenKeys.add(dedupeKey);
+      items.push(item);
+      pendingItem = item;
     }
 
     items.sort((a, b) => a.top - b.top);
@@ -399,8 +538,6 @@
         }
 
         .item {
-          display: block;
-          width: 100%;
           text-align: left;
           border: 1px solid transparent;
           background: rgba(255,255,255,0.04);
@@ -421,17 +558,56 @@
           border-color: rgba(255,255,255,0.18);
         }
 
+        .itemTop {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+
         .index {
           display: inline-block;
           font-size: 11px;
           color: rgba(255,255,255,0.56);
-          margin-bottom: 6px;
+          margin-bottom: 0;
+        }
+
+        .itemActions {
+          display: flex;
+          gap: 6px;
+          flex: 0 0 auto;
+        }
+
+        .itemActionBtn {
+          padding: 4px 8px;
+          font-size: 11px;
+          border-radius: 8px;
+        }
+
+        .itemBtn {
+          display: block;
+          width: 100%;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          text-align: left;
+          cursor: pointer;
         }
 
         .text {
           font-size: 13px;
           line-height: 1.42;
           color: rgba(255,255,255,0.95);
+          word-break: break-word;
+        }
+
+        .answerHint {
+          margin-top: 8px;
+          font-size: 11px;
+          line-height: 1.45;
+          color: rgba(255,255,255,0.62);
           word-break: break-word;
         }
 
@@ -443,7 +619,7 @@
         }
 
         .btn:focus-visible,
-        .item:focus-visible,
+        .itemBtn:focus-visible,
         .search:focus-visible {
           outline: 2px solid rgba(255,255,255,0.55);
           outline-offset: 2px;
@@ -568,24 +744,61 @@
 
     const html = state.filteredItems.length
       ? state.filteredItems.map((item, idx) => `
-          <button class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}" type="button" title="${escapeHtml(item.text)}">
-            <span class="index">Q${idx + 1}</span>
-            <div class="text">${escapeHtml(item.preview)}</div>
-          </button>
+          <div class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
+            <div class="itemTop">
+              <span class="index">Q${idx + 1}</span>
+              ${item.answerNode ? `
+                <div class="itemActions">
+                  <button
+                    class="btn itemActionBtn"
+                    data-action="answer"
+                    data-id="${escapeHtml(item.id)}"
+                    type="button"
+                    title="${escapeHtml(item.answerPreview || '해당 답변으로 이동')}"
+                  >
+                    답변
+                  </button>
+                </div>
+              ` : ''}
+            </div>
+            <button
+              class="itemBtn"
+              data-action="question"
+              data-id="${escapeHtml(item.id)}"
+              type="button"
+              title="${escapeHtml(item.preview)}"
+            >
+              <div class="text">${escapeHtml(item.preview)}</div>
+            </button>
+            ${item.hasImage && item.answerPreview ? `
+              <div class="answerHint" title="${escapeHtml(item.answerPreview)}">
+                답변: ${escapeHtml(item.answerPreview)}
+              </div>
+            ` : ''}
+          </div>
         `).join('')
       : `<div class="empty">${emptyMessage}</div>`;
 
     list.innerHTML = html;
 
-    list.querySelectorAll('.item').forEach((btn) => {
+    list.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-id');
         const item = state.items.find((x) => x.id === id);
-        if (!item?.node) return;
+        if (!item) return;
 
-        item.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
         state.activeId = id;
         updateActiveClassOnly();
+
+        if (btn.getAttribute('data-action') === 'answer') {
+          if (!item.answerNode) return;
+          item.answerNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          flashTarget(item.answerNode);
+          return;
+        }
+
+        if (!item.node) return;
+        item.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
         flashTarget(item.node);
       });
     });
