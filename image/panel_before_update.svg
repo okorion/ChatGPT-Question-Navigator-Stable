@@ -1,0 +1,36 @@
+<svg width="840" height="560" viewBox="0 0 840 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="840" height="560" rx="28" fill="#0F1117"/>
+  <text x="40" y="64" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="30" font-weight="700">변경 전 예시 패널</text>
+  <text x="40" y="98" fill="#94A3B8" font-family="Arial, sans-serif" font-size="17">
+    <tspan x="40" dy="0">테스트 시나리오: 텍스트 질문 1개,</tspan>
+    <tspan x="40" dy="24">이미지 전용 질문 1개, assistant 답변 1개</tspan>
+  </text>
+
+  <rect x="42" y="144" width="360" height="368" rx="22" fill="#171923" stroke="#2A2F3A"/>
+  <text x="72" y="188" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="24" font-weight="700">질문 네비게이션</text>
+  <rect x="72" y="210" width="300" height="42" rx="14" fill="#202431" stroke="#343A49"/>
+  <text x="92" y="237" fill="#7C879A" font-family="Arial, sans-serif" font-size="16">질문 검색</text>
+
+  <rect x="72" y="272" width="300" height="92" rx="18" fill="#232837" stroke="#3A4256"/>
+  <text x="92" y="302" fill="#A8B3C7" font-family="Arial, sans-serif" font-size="14">Q1</text>
+  <text x="92" y="336" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="20" font-weight="700">삼차함수 극값 구해줘</text>
+  <text x="92" y="364" fill="#94A3B8" font-family="Arial, sans-serif" font-size="15">텍스트 질문만 목록에 표시됨</text>
+
+  <rect x="72" y="384" width="300" height="108" rx="18" fill="#191D28" stroke="#31384A" stroke-dasharray="8 8"/>
+  <text x="92" y="418" fill="#64748B" font-family="Arial, sans-serif" font-size="14">이미지 질문</text>
+  <text x="92" y="446" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="18" font-weight="700">목록에 표시되지 않음</text>
+  <text x="92" y="470" fill="#64748B" font-family="Arial, sans-serif" font-size="14">
+    <tspan x="92" dy="0">img가 제거되어 질문 텍스트가</tspan>
+    <tspan x="92" dy="18">비어 버림</tspan>
+  </text>
+
+  <rect x="446" y="174" width="344" height="128" rx="22" fill="#1B2333" stroke="#2F3D5A"/>
+  <text x="474" y="212" fill="#E2E8F0" font-family="Arial, sans-serif" font-size="22" font-weight="700">문제점</text>
+  <text x="474" y="250" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="16">- 이미지 전용 질문이 패널에서 누락됨</text>
+  <text x="474" y="280" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="16">- 질문에서 답변으로 바로 이동할 수 없음</text>
+
+  <rect x="446" y="332" width="344" height="132" rx="22" fill="#2A1722" stroke="#6E2748"/>
+  <text x="474" y="370" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="22" font-weight="700">사용자 체감</text>
+  <text x="474" y="408" fill="#FBCFE8" font-family="Arial, sans-serif" font-size="16">이미지 문제 풀이 대화에서는</text>
+  <text x="474" y="438" fill="#FBCFE8" font-family="Arial, sans-serif" font-size="16">질문과 답변 위치를 다시 찾아야 함</text>
+</svg>

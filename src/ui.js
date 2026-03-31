@@ -186,8 +186,6 @@
         }
 
         .item {
-          display: block;
-          width: 100%;
           text-align: left;
           border: 1px solid transparent;
           background: rgba(255,255,255,0.04);
@@ -208,17 +206,56 @@
           border-color: rgba(255,255,255,0.18);
         }
 
+        .itemTop {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+
         .index {
           display: inline-block;
           font-size: 11px;
           color: rgba(255,255,255,0.56);
-          margin-bottom: 6px;
+          margin-bottom: 0;
+        }
+
+        .itemActions {
+          display: flex;
+          gap: 6px;
+          flex: 0 0 auto;
+        }
+
+        .itemActionBtn {
+          padding: 4px 8px;
+          font-size: 11px;
+          border-radius: 8px;
+        }
+
+        .itemBtn {
+          display: block;
+          width: 100%;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          text-align: left;
+          cursor: pointer;
         }
 
         .text {
           font-size: 13px;
           line-height: 1.42;
           color: rgba(255,255,255,0.95);
+          word-break: break-word;
+        }
+
+        .answerHint {
+          margin-top: 8px;
+          font-size: 11px;
+          line-height: 1.45;
+          color: rgba(255,255,255,0.62);
           word-break: break-word;
         }
 
@@ -230,7 +267,7 @@
         }
 
         .btn:focus-visible,
-        .item:focus-visible,
+        .itemBtn:focus-visible,
         .search:focus-visible {
           outline: 2px solid rgba(255,255,255,0.55);
           outline-offset: 2px;
@@ -355,24 +392,61 @@
 
     const html = state.filteredItems.length
       ? state.filteredItems.map((item, idx) => `
-          <button class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}" type="button" title="${escapeHtml(item.text)}">
-            <span class="index">Q${idx + 1}</span>
-            <div class="text">${escapeHtml(item.preview)}</div>
-          </button>
+          <div class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
+            <div class="itemTop">
+              <span class="index">Q${idx + 1}</span>
+              ${item.answerNode ? `
+                <div class="itemActions">
+                  <button
+                    class="btn itemActionBtn"
+                    data-action="answer"
+                    data-id="${escapeHtml(item.id)}"
+                    type="button"
+                    title="${escapeHtml(item.answerPreview || '해당 답변으로 이동')}"
+                  >
+                    답변
+                  </button>
+                </div>
+              ` : ''}
+            </div>
+            <button
+              class="itemBtn"
+              data-action="question"
+              data-id="${escapeHtml(item.id)}"
+              type="button"
+              title="${escapeHtml(item.preview)}"
+            >
+              <div class="text">${escapeHtml(item.preview)}</div>
+            </button>
+            ${item.hasImage && item.answerPreview ? `
+              <div class="answerHint" title="${escapeHtml(item.answerPreview)}">
+                답변: ${escapeHtml(item.answerPreview)}
+              </div>
+            ` : ''}
+          </div>
         `).join('')
       : `<div class="empty">${emptyMessage}</div>`;
 
     list.innerHTML = html;
 
-    list.querySelectorAll('.item').forEach((btn) => {
+    list.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-id');
         const item = state.items.find((x) => x.id === id);
-        if (!item?.node) return;
+        if (!item) return;
 
-        item.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
         state.activeId = id;
         updateActiveClassOnly();
+
+        if (btn.getAttribute('data-action') === 'answer') {
+          if (!item.answerNode) return;
+          item.answerNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          flashTarget(item.answerNode);
+          return;
+        }
+
+        if (!item.node) return;
+        item.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
         flashTarget(item.node);
       });
     });

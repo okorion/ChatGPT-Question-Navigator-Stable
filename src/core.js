@@ -19,8 +19,6 @@
     scanTimer: null,
     interactionTimer: null,
     activeTimer: null,
-    nodeIdMap: new WeakMap(),
-    idCounter: 0,
   };
 
   function log(...args) {
@@ -93,21 +91,20 @@
     return clean.slice(0, maxLen - 1) + '…';
   }
 
-  function getOrAssignNodeId(node) {
-    if (state.nodeIdMap.has(node)) {
-      return state.nodeIdMap.get(node);
-    }
-    const id = `qnav-${++state.idCounter}`;
-    state.nodeIdMap.set(node, id);
-    return id;
-  }
-
   function buildSignature(items) {
-    return items.map((item) => `${item.id}:${item.preview}`).join('|');
+    return items
+      .map((item) => [
+        item.id,
+        item.preview,
+        item.hasImage ? '1' : '0',
+        item.answerId || '',
+        item.answerPreview || '',
+      ].join(':'))
+      .join('|');
   }
 
   function filterItems(items, query) {
     const q = normalizeText(query).toLowerCase();
     if (!q) return items.slice();
-    return items.filter((item) => item.text.toLowerCase().includes(q));
+    return items.filter((item) => (item.searchText || item.text || '').toLowerCase().includes(q));
   }

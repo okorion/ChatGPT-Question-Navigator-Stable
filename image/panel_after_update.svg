@@ -1,0 +1,48 @@
+<svg width="840" height="560" viewBox="0 0 840 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="840" height="560" rx="28" fill="#0F1117"/>
+  <text x="40" y="64" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="30" font-weight="700">변경 후 예시 패널</text>
+  <text x="40" y="98" fill="#94A3B8" font-family="Arial, sans-serif" font-size="17">
+    <tspan x="40" dy="0">테스트 시나리오: 이미지 전용 질문 업로드 후</tspan>
+    <tspan x="40" dy="24">assistant 답변이 생성된 상태</tspan>
+  </text>
+
+  <rect x="42" y="144" width="360" height="368" rx="22" fill="#171923" stroke="#2A2F3A"/>
+  <text x="72" y="188" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="24" font-weight="700">질문 네비게이션</text>
+  <rect x="72" y="210" width="300" height="42" rx="14" fill="#202431" stroke="#343A49"/>
+  <text x="92" y="237" fill="#7C879A" font-family="Arial, sans-serif" font-size="16">질문 검색</text>
+
+  <rect x="72" y="272" width="300" height="92" rx="18" fill="#232837" stroke="#3A4256"/>
+  <text x="92" y="302" fill="#A8B3C7" font-family="Arial, sans-serif" font-size="14">Q1</text>
+  <text x="92" y="336" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="20" font-weight="700">삼차함수 극값 구해줘</text>
+  <text x="92" y="364" fill="#94A3B8" font-family="Arial, sans-serif" font-size="15">기존 텍스트 질문 동작 유지</text>
+
+  <rect x="72" y="384" width="300" height="116" rx="18" fill="#2A3143" stroke="#5B6B8A"/>
+  <text x="92" y="414" fill="#A8B3C7" font-family="Arial, sans-serif" font-size="14">Q2</text>
+  <rect x="292" y="399" width="56" height="28" rx="10" fill="#1F2937" stroke="#667085"/>
+  <text x="306" y="418" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="14" font-weight="700">답변</text>
+  <text x="92" y="448" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="20" font-weight="700">(이미지)</text>
+  <text x="92" y="474" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="14">
+    <tspan x="92" dy="0">답변: x=3, y=2에서</tspan>
+    <tspan x="92" dy="20">극댓값이 나옵니다.</tspan>
+  </text>
+
+  <rect x="446" y="164" width="344" height="172" rx="22" fill="#182A23" stroke="#2B6A53"/>
+  <text x="474" y="190" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="22" font-weight="700">개선점</text>
+  <text x="474" y="226" fill="#D1FAE5" font-family="Arial, sans-serif" font-size="16">
+    <tspan x="474" dy="0">- 이미지 전용 질문도</tspan>
+    <tspan x="490" dy="22">`(이미지)`로 유지</tspan>
+  </text>
+  <text x="474" y="270" fill="#D1FAE5" font-family="Arial, sans-serif" font-size="16">- 이미지 질문에는 답변 힌트 노출</text>
+  <text x="474" y="302" fill="#D1FAE5" font-family="Arial, sans-serif" font-size="16">
+    <tspan x="474" dy="0">- `답변` 버튼으로 응답 위치로</tspan>
+    <tspan x="490" dy="22">바로 이동</tspan>
+  </text>
+
+  <rect x="446" y="352" width="344" height="132" rx="22" fill="#1B2333" stroke="#2F3D5A"/>
+  <text x="474" y="390" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="22" font-weight="700">검색 개선</text>
+  <text x="474" y="426" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="16">
+    <tspan x="474" dy="0">이미지 질문은 `(이미지)`와</tspan>
+    <tspan x="474" dy="22">답변 힌트 키워드로 더 쉽게</tspan>
+    <tspan x="474" dy="22">다시 찾을 수 있음</tspan>
+  </text>
+</svg>
