@@ -233,6 +233,11 @@
           border-radius: 8px;
         }
 
+        .itemActionBtn:disabled {
+          opacity: 0.42;
+          cursor: not-allowed;
+        }
+
         .itemBtn {
           display: block;
           width: 100%;
@@ -395,19 +400,18 @@
           <div class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
             <div class="itemTop">
               <span class="index">Q${idx + 1}</span>
-              ${item.answerNode ? `
-                <div class="itemActions">
-                  <button
-                    class="btn itemActionBtn"
-                    data-action="answer"
-                    data-id="${escapeHtml(item.id)}"
-                    type="button"
-                    title="${escapeHtml(item.answerPreview || '해당 답변으로 이동')}"
-                  >
-                    답변
-                  </button>
-                </div>
-              ` : ''}
+              <div class="itemActions">
+                <button
+                  class="btn itemActionBtn"
+                  data-action="answer"
+                  data-id="${escapeHtml(item.id)}"
+                  type="button"
+                  title="${escapeHtml(item.answerNode ? (item.answerPreview || '해당 답변으로 이동') : '아직 답변이 없습니다')}"
+                  ${item.answerNode ? '' : 'disabled'}
+                >
+                  답변
+                </button>
+              </div>
             </div>
             <button
               class="itemBtn"

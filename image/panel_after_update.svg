@@ -13,6 +13,8 @@
 
   <rect x="72" y="272" width="300" height="92" rx="18" fill="#232837" stroke="#3A4256"/>
   <text x="92" y="302" fill="#A8B3C7" font-family="Arial, sans-serif" font-size="14">Q1</text>
+  <rect x="292" y="287" width="56" height="28" rx="10" fill="#1F2937" stroke="#667085"/>
+  <text x="306" y="306" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="14" font-weight="700">답변</text>
   <text x="92" y="336" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="20" font-weight="700">삼차함수 극값 구해줘</text>
   <text x="92" y="364" fill="#94A3B8" font-family="Arial, sans-serif" font-size="15">기존 텍스트 질문 동작 유지</text>
 
@@ -34,8 +36,8 @@
   </text>
   <text x="474" y="270" fill="#D1FAE5" font-family="Arial, sans-serif" font-size="16">- 이미지 질문에는 답변 힌트 노출</text>
   <text x="474" y="302" fill="#D1FAE5" font-family="Arial, sans-serif" font-size="16">
-    <tspan x="474" dy="0">- `답변` 버튼으로 응답 위치로</tspan>
-    <tspan x="490" dy="22">바로 이동</tspan>
+    <tspan x="474" dy="0">- 모든 질문 카드에서 `답변`</tspan>
+    <tspan x="490" dy="22">버튼으로 바로 이동</tspan>
   </text>
 
   <rect x="446" y="352" width="344" height="132" rx="22" fill="#1B2333" stroke="#2F3D5A"/>
