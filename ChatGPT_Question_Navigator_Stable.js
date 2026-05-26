@@ -817,13 +817,13 @@
 
         if (btn.getAttribute('data-action') === 'answer') {
           if (!item.answerNode) return;
-          item.answerNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          item.answerNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
           flashTarget(item.answerNode);
           return;
         }
 
         if (!item.node) return;
-        item.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        item.node.scrollIntoView({ behavior: 'smooth', block: 'start' });
         flashTarget(item.node);
       });
     });
