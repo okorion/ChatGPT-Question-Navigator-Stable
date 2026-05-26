@@ -1,5 +1,14 @@
   function getConversationRoot() {
-    return document.querySelector('main') || document.body;
+    const roots = [document.querySelector('main'), document.body].filter(
+      (root) => root instanceof HTMLElement
+    );
+
+    return roots
+      .map((root) => ({
+        root,
+        count: root.querySelectorAll('[data-message-author-role]').length,
+      }))
+      .sort((a, b) => b.count - a.count)[0]?.root || document.body;
   }
   const DOM_NODE_ID_ATTR = 'data-cgpt-qnav-id';
   let domNodeIdCounter = 0;
@@ -15,19 +24,31 @@
 
   function getRoleNodes() {
     const root = getConversationRoot();
-    return Array.from(root.querySelectorAll('[data-message-author-role]'));
+    const rootNodes = Array.from(root.querySelectorAll('[data-message-author-role]'));
+    const documentNodes = Array.from(document.querySelectorAll('[data-message-author-role]'));
+
+    return documentNodes.length > rootNodes.length ? documentNodes : rootNodes;
+  }
+
+  function isUsableMessageTarget(node, roleNode) {
+    if (!(node instanceof HTMLElement)) return false;
+    if (!node.contains(roleNode)) return false;
+
+    return node.querySelectorAll('[data-message-author-role]').length <= 1;
   }
 
   function getTargetContainer(roleNode) {
     if (!(roleNode instanceof HTMLElement)) return null;
 
-    return (
-      roleNode.closest('article') ||
-      roleNode.closest('[data-testid^="conversation-turn-"]') ||
-      roleNode.closest('[data-message-id]') ||
-      roleNode.closest('[class*="conversation-turn"]') ||
-      roleNode
-    );
+    const candidates = [
+      roleNode.closest('article'),
+      roleNode.closest('[data-testid^="conversation-turn-"]'),
+      roleNode.closest('[data-message-id]'),
+      roleNode.closest('[class*="conversation-turn"]'),
+      roleNode,
+    ];
+
+    return candidates.find((candidate) => isUsableMessageTarget(candidate, roleNode)) || roleNode;
   }
 
   function cloneRoleNode(roleNode, { removeImages = false } = {}) {
