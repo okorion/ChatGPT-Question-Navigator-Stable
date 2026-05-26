@@ -19,6 +19,29 @@
     updateActiveByViewport();
   }
 
+  function finishManualRefresh(serial = state.manualRefreshSerial) {
+    if (serial !== state.manualRefreshSerial || state.refreshStatus !== 'loading') return;
+
+    clearTimeout(state.manualRefreshFallbackTimer);
+    state.manualRefreshFallbackTimer = null;
+    setRefreshFeedback('done');
+  }
+
+  function startManualRefresh() {
+    state.manualRefreshSerial += 1;
+    const refreshSerial = state.manualRefreshSerial;
+    const conversationId = getConversationIdFromUrl();
+
+    clearTimeout(state.manualRefreshFallbackTimer);
+    setRefreshFeedback('loading');
+    resetConversationApiState(conversationId);
+    scanAndRender('manual');
+
+    state.manualRefreshFallbackTimer = setTimeout(() => {
+      finishManualRefresh(refreshSerial);
+    }, conversationId ? 3200 : 450);
+  }
+
   function resetConversationApiState(conversationId = '') {
     state.apiConversationId = conversationId;
     state.apiItems = [];
@@ -61,6 +84,7 @@
         state.apiLoadFailed = false;
         state.apiRetryCount = 0;
         scanAndRender('conversation-api');
+        finishManualRefresh();
       })
       .catch((error) => {
         if (state.apiConversationId !== conversationId || state.apiRequestSerial !== requestSerial) {
@@ -80,6 +104,8 @@
             scanAndRender('conversation-api-retry');
           }, retryDelay);
         }
+
+        finishManualRefresh();
       })
       .finally(() => {
         if (state.apiConversationId === conversationId && state.apiRequestSerial === requestSerial) {

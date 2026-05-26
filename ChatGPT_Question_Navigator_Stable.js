@@ -46,6 +46,10 @@
     apiRetryTimer: null,
     navigationSerial: 0,
     navigationActiveId: '',
+    refreshStatus: 'idle',
+    refreshTimer: null,
+    manualRefreshSerial: 0,
+    manualRefreshFallbackTimer: null,
   };
 
   function log(...args) {
@@ -752,6 +756,71 @@
           background: rgba(255,255,255,0.10);
         }
 
+        .btn:disabled {
+          opacity: 0.72;
+          cursor: progress;
+        }
+
+        .btn.loading {
+          border-color: rgba(96,165,250,0.45);
+          background: rgba(59,130,246,0.18);
+        }
+
+        .btn.done {
+          border-color: rgba(74,222,128,0.38);
+          background: rgba(34,197,94,0.16);
+        }
+
+        .refreshFeedback {
+          display: grid;
+          gap: 6px;
+          padding: 8px 12px 9px;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.035);
+        }
+
+        .refreshText {
+          font-size: 11px;
+          line-height: 1.2;
+          color: rgba(255,255,255,0.68);
+        }
+
+        .refreshTrack {
+          height: 3px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: rgba(255,255,255,0.10);
+        }
+
+        .refreshBar {
+          width: 100%;
+          height: 100%;
+          border-radius: inherit;
+          background: rgba(96,165,250,0.92);
+          transform-origin: left center;
+        }
+
+        .refreshFeedback.loading .refreshBar {
+          animation: refreshSlide 1s ease-in-out infinite;
+        }
+
+        .refreshFeedback.done .refreshBar {
+          background: rgba(74,222,128,0.92);
+          transform: scaleX(1);
+        }
+
+        @keyframes refreshSlide {
+          0% {
+            transform: translateX(-100%) scaleX(0.32);
+          }
+          55% {
+            transform: translateX(18%) scaleX(0.62);
+          }
+          100% {
+            transform: translateX(100%) scaleX(0.32);
+          }
+        }
+
         .searchWrap {
           padding: 10px 12px;
           border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -900,6 +969,10 @@
             <button class="btn" id="hideBtn" type="button">닫기</button>
           </div>
         </div>
+        <div class="refreshFeedback hidden" id="refreshFeedback" aria-live="polite">
+          <div class="refreshTrack"><div class="refreshBar"></div></div>
+          <div class="refreshText" id="refreshText">Refreshing...</div>
+        </div>
         <div class="searchWrap">
           <div class="searchRow">
             <input class="search" id="searchInput" type="text" placeholder="질문 검색" aria-label="질문 검색" />
@@ -915,6 +988,8 @@
       app: state.shadow.querySelector('.app'),
       refreshBtn: state.shadow.getElementById('refreshBtn'),
       hideBtn: state.shadow.getElementById('hideBtn'),
+      refreshFeedback: state.shadow.getElementById('refreshFeedback'),
+      refreshText: state.shadow.getElementById('refreshText'),
       searchInput: state.shadow.getElementById('searchInput'),
       clearSearchBtn: state.shadow.getElementById('clearSearchBtn'),
       list: state.shadow.getElementById('list'),
@@ -935,7 +1010,7 @@
     });
 
     els.refreshBtn.addEventListener('click', () => {
-      scanAndRender('manual');
+      startManualRefresh();
     });
 
     els.searchInput.addEventListener('input', (e) => {
@@ -976,6 +1051,42 @@
     els.list.addEventListener('touchmove', markInteracting, { passive: true });
 
     syncSearchUi();
+    setRefreshFeedback('idle');
+  }
+
+  function setRefreshFeedback(status) {
+    state.refreshStatus = status;
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+
+    const els = state.els;
+    if (!els?.refreshBtn || !els.refreshFeedback || !els.refreshText) return;
+
+    els.refreshBtn.classList.toggle('loading', status === 'loading');
+    els.refreshBtn.classList.toggle('done', status === 'done');
+    els.refreshBtn.disabled = status === 'loading';
+    els.refreshBtn.setAttribute('aria-busy', status === 'loading' ? 'true' : 'false');
+    els.refreshFeedback.classList.toggle('hidden', status === 'idle');
+    els.refreshFeedback.classList.toggle('loading', status === 'loading');
+    els.refreshFeedback.classList.toggle('done', status === 'done');
+
+    if (status === 'loading') {
+      els.refreshBtn.textContent = '새로고침 중';
+      els.refreshText.textContent = '질문 목록을 새로고침하는 중입니다';
+      return;
+    }
+
+    if (status === 'done') {
+      els.refreshBtn.textContent = '완료';
+      els.refreshText.textContent = '질문 목록 새로고침 완료';
+      state.refreshTimer = setTimeout(() => {
+        setRefreshFeedback('idle');
+      }, 1400);
+      return;
+    }
+
+    els.refreshBtn.textContent = '새로고침';
+    els.refreshText.textContent = '';
   }
 
   function applyCollapsedState() {
@@ -1290,6 +1401,29 @@
     updateActiveByViewport();
   }
 
+  function finishManualRefresh(serial = state.manualRefreshSerial) {
+    if (serial !== state.manualRefreshSerial || state.refreshStatus !== 'loading') return;
+
+    clearTimeout(state.manualRefreshFallbackTimer);
+    state.manualRefreshFallbackTimer = null;
+    setRefreshFeedback('done');
+  }
+
+  function startManualRefresh() {
+    state.manualRefreshSerial += 1;
+    const refreshSerial = state.manualRefreshSerial;
+    const conversationId = getConversationIdFromUrl();
+
+    clearTimeout(state.manualRefreshFallbackTimer);
+    setRefreshFeedback('loading');
+    resetConversationApiState(conversationId);
+    scanAndRender('manual');
+
+    state.manualRefreshFallbackTimer = setTimeout(() => {
+      finishManualRefresh(refreshSerial);
+    }, conversationId ? 3200 : 450);
+  }
+
   function resetConversationApiState(conversationId = '') {
     state.apiConversationId = conversationId;
     state.apiItems = [];
@@ -1332,6 +1466,7 @@
         state.apiLoadFailed = false;
         state.apiRetryCount = 0;
         scanAndRender('conversation-api');
+        finishManualRefresh();
       })
       .catch((error) => {
         if (state.apiConversationId !== conversationId || state.apiRequestSerial !== requestSerial) {
@@ -1351,6 +1486,8 @@
             scanAndRender('conversation-api-retry');
           }, retryDelay);
         }
+
+        finishManualRefresh();
       })
       .finally(() => {
         if (state.apiConversationId === conversationId && state.apiRequestSerial === requestSerial) {

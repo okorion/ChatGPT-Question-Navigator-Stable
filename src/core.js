@@ -29,6 +29,10 @@
     apiRetryTimer: null,
     navigationSerial: 0,
     navigationActiveId: '',
+    refreshStatus: 'idle',
+    refreshTimer: null,
+    manualRefreshSerial: 0,
+    manualRefreshFallbackTimer: null,
   };
 
   function log(...args) {
