@@ -27,6 +27,8 @@
     apiRequestSerial: 0,
     apiRetryCount: 0,
     apiRetryTimer: null,
+    navigationSerial: 0,
+    navigationActiveId: '',
   };
 
   function log(...args) {

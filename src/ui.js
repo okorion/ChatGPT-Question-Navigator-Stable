@@ -439,15 +439,18 @@
         const item = state.items.find((x) => x.id === id);
         if (!item) return;
 
-        state.activeId = id;
-        updateActiveClassOnly();
+        const navigationSerial = beginItemNavigation(id);
 
-        if (btn.getAttribute('data-action') === 'answer') {
-          await scrollToItemTarget(item, 'answer');
-          return;
+        try {
+          if (btn.getAttribute('data-action') === 'answer') {
+            await scrollToItemTarget(item, 'answer', navigationSerial);
+            return;
+          }
+
+          await scrollToItemTarget(item, 'question', navigationSerial);
+        } finally {
+          finishItemNavigation(id, navigationSerial);
         }
-
-        await scrollToItemTarget(item, 'question');
       });
     });
 

@@ -174,6 +174,8 @@
         clearSettledScan('url-change');
         clearTimeout(state.activeTimer);
         state.activeTimer = null;
+        state.navigationSerial += 1;
+        state.navigationActiveId = '';
         state.lastUrl = location.href;
         state.activeId = null;
         state.listScrollTop = 0;
