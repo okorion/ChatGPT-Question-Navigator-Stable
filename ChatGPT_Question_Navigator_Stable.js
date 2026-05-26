@@ -290,7 +290,12 @@
 
     if (expected && expected.length >= 24) {
       const head = expected.slice(0, 160);
-      return candidate.includes(head) || expected.includes(candidate.slice(0, 160));
+      if (candidate.includes(head)) return true;
+
+      const candidateHead = candidate.slice(0, 160);
+      if (candidateHead.length >= 80 && expected.includes(candidateHead)) {
+        return true;
+      }
     }
 
     return false;
@@ -421,6 +426,7 @@
         pendingItem.answerMessageId = messageId;
         pendingItem.answerText = answerText;
         pendingItem.answerPreview = answerPreview;
+        pendingItem.answerTop = targetNode.getBoundingClientRect().top + window.scrollY;
         pendingItem.searchText = buildSearchText(
           pendingItem.text,
           pendingItem.hasImage,
@@ -455,6 +461,7 @@
         answerMessageId: '',
         answerText: '',
         answerPreview: '',
+        answerTop: Number.POSITIVE_INFINITY,
         searchText: buildSearchText(text, hasImage),
       };
 
@@ -597,6 +604,7 @@
         answerMessageId: answer?.id || '',
         answerText,
         answerPreview,
+        answerTop: Number.POSITIVE_INFINITY,
         searchText: buildSearchText(text, hasImage, answerPreview),
         apiIndex: items.length,
         apiPathIndex: pathIndex,
@@ -653,6 +661,9 @@
         ? findMessageTargetForItem(apiItem, 'answer')
         : domItem?.answerNode || null;
       const answerPreview = apiItem.answerPreview || domItem?.answerPreview || '';
+      const answerTop = Number.isFinite(domItem?.answerTop)
+        ? domItem.answerTop
+        : apiItem.answerTop;
 
       return {
         ...apiItem,
@@ -661,6 +672,7 @@
         top: Number.isFinite(domItem?.top) ? domItem.top : apiItem.top,
         answerNode,
         answerPreview,
+        answerTop,
         searchText: buildSearchText(apiItem.text, apiItem.hasImage, answerPreview),
       };
     });
@@ -1174,8 +1186,10 @@
       : '표시할 사용자 질문이 없습니다';
 
     const html = state.filteredItems.length
-      ? state.filteredItems.map((item, idx) => `
-          <div class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
+      ? state.filteredItems.map((item, idx) => {
+        const isActive = item.id === state.activeId || item.id === state.navigationActiveId;
+        return `
+          <div class="item${isActive ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
             <div class="itemTop">
               <span class="index">Q${idx + 1}</span>
               <div class="itemActions">
@@ -1206,7 +1220,8 @@
               </div>
             ` : ''}
           </div>
-        `).join('')
+        `;
+      }).join('')
       : `<div class="empty">${emptyMessage}</div>`;
 
     list.innerHTML = html;
@@ -1217,10 +1232,11 @@
         const item = state.items.find((x) => x.id === id);
         if (!item) return;
 
+        const action = btn.getAttribute('data-action') === 'answer' ? 'answer' : 'question';
         const navigationSerial = beginItemNavigation(id);
 
         try {
-          if (btn.getAttribute('data-action') === 'answer') {
+          if (action === 'answer') {
             await scrollToItemTarget(item, 'answer', navigationSerial);
             return;
           }
@@ -1245,7 +1261,7 @@
 
     state.els.list.querySelectorAll('.item').forEach((btn) => {
       const id = btn.getAttribute('data-id');
-      btn.classList.toggle('active', id === state.activeId);
+      btn.classList.toggle('active', id === state.activeId || id === state.navigationActiveId);
     });
   }
 
@@ -1306,16 +1322,25 @@
   }
 
   function updateActiveByViewport() {
-    const positionedItems = state.items.filter((item) => Number.isFinite(item.top));
+    const container = getConversationScrollContainer();
+    const metrics = getScrollMetrics(container);
+    const positionedItems = state.items
+      .map((item) => ({
+        item,
+        top: getItemKnownTop(item, 'question', container),
+      }))
+      .filter((entry) => Number.isFinite(entry.top))
+      .sort((a, b) => a.top - b.top);
+
     if (!positionedItems.length) return;
     if (state.navigationActiveId) return;
     if (state.activeTimer) return;
 
-    const currentY = window.scrollY + window.innerHeight * 0.28;
-    let active = positionedItems[0];
+    const currentY = metrics.top + metrics.viewport * 0.28;
+    let active = positionedItems[0].item;
 
-    for (const item of positionedItems) {
-      if (item.top <= currentY) active = item;
+    for (const entry of positionedItems) {
+      if (entry.top <= currentY) active = entry.item;
       else break;
     }
 
@@ -1408,6 +1433,42 @@
     return nodeRect.top - containerRect.top + container.scrollTop;
   }
 
+  function getItemKnownTop(item, targetKind, container = getConversationScrollContainer()) {
+    if (!item) return null;
+
+    const isAnswer = targetKind === 'answer';
+    const node = isAnswer ? item.answerNode : item.node;
+    if (node?.isConnected) {
+      return getNodeScrollTop(node, container);
+    }
+
+    const top = isAnswer ? item.answerTop : item.top;
+    if (Number.isFinite(top)) {
+      return top;
+    }
+
+    return null;
+  }
+
+  function setItemKnownTop(item, targetKind, top) {
+    if (!Number.isFinite(top)) return;
+
+    if (targetKind === 'answer') {
+      item.answerTop = top;
+      return;
+    }
+
+    item.top = top;
+  }
+
+  function scrollNodeToTop(node, container, behavior = 'smooth') {
+    const top = getNodeScrollTop(node, container);
+    if (!Number.isFinite(top)) return false;
+
+    setScrollTop(container, top, behavior);
+    return true;
+  }
+
   function getNavigationRatio(item, targetKind) {
     const targetPathIndex = targetKind === 'answer' && item.answerApiPathIndex >= 0
       ? item.answerApiPathIndex
@@ -1437,32 +1498,46 @@
 
     const ratio = getNavigationRatio(item, targetKind);
     const candidates = new Set();
-    const preferredTop = Math.round(metrics.max * ratio);
+    const knownTop = getItemKnownTop(item, targetKind, container);
+    const preferredTop = Math.round(
+      Number.isFinite(knownTop) ? knownTop : metrics.max * ratio
+    );
+    const clampTop = (value) => Math.round(Math.min(metrics.max, Math.max(0, value)));
+    const addTop = (value) => candidates.add(clampTop(value));
 
+    addTop(preferredTop);
     [
-      ratio,
-      ratio - 0.015,
-      ratio + 0.015,
-      ratio - 0.04,
-      ratio + 0.04,
-      ratio - 0.1,
-      ratio + 0.1,
-      ratio - 0.18,
-      ratio + 0.18,
-    ].forEach((value) => {
-      candidates.add(Math.round(metrics.max * Math.min(1, Math.max(0, value))));
+      -0.5,
+      0.5,
+      -1,
+      1,
+      -1.75,
+      1.75,
+      -2.75,
+      2.75,
+      -4,
+      4,
+    ].forEach((viewportOffset) => {
+      addTop(preferredTop + metrics.viewport * viewportOffset);
     });
 
-    const knownNode = targetKind === 'answer' ? item.answerNode : item.node;
-    const knownTop = knownNode?.isConnected
-      ? getNodeScrollTop(knownNode, container)
-      : (isDocumentScrollContainer(container) && Number.isFinite(item.top) ? item.top : null);
-    if (Number.isFinite(knownTop)) {
-      candidates.add(Math.round(Math.min(metrics.max, Math.max(0, knownTop))));
-    }
+    [
+      ratio - 0.025,
+      ratio + 0.025,
+      ratio - 0.06,
+      ratio + 0.06,
+      ratio - 0.12,
+      ratio + 0.12,
+    ].forEach((value) => {
+      addTop(metrics.max * Math.min(1, Math.max(0, value)));
+    });
 
-    for (let i = 0; i <= 80; i += 1) {
-      candidates.add(Math.round(metrics.max * (i / 80)));
+    const coarseRange = Math.max(metrics.viewport * 5, metrics.max * 0.28);
+    for (let i = 1; i < 12; i += 1) {
+      const top = metrics.max * (i / 12);
+      if (Math.abs(top - preferredTop) <= coarseRange) {
+        addTop(top);
+      }
     }
 
     return Array.from(candidates).sort((a, b) => {
@@ -1480,7 +1555,7 @@
     for (const top of buildScrollProbePositions(item, targetKind, container)) {
       if (!isCurrentNavigation(serial, item.id)) return null;
       setScrollTop(container, top, 'auto');
-      await wait(120);
+      await wait(90);
 
       const node = findMessageTargetForItem(item, targetKind);
       if (node) return node;
@@ -1489,8 +1564,8 @@
     if (isCurrentNavigation(serial, item.id)) {
       const metrics = getScrollMetrics(container);
       const estimatedTop = Math.round(metrics.max * getNavigationRatio(item, targetKind));
-      setScrollTop(container, estimatedTop, 'smooth');
-      await wait(220);
+      setScrollTop(container, estimatedTop, 'auto');
+      await wait(120);
       return findMessageTargetForItem(item, targetKind);
     }
 
@@ -1505,14 +1580,17 @@
 
     if (!targetNode) return false;
 
+    const container = getConversationScrollContainer();
+    const targetTop = getNodeScrollTop(targetNode, container);
+
     if (isAnswer) {
       item.answerNode = targetNode;
     } else {
       item.node = targetNode;
     }
-    item.top = targetNode.getBoundingClientRect().top + window.scrollY;
+    setItemKnownTop(item, targetKind, targetTop);
 
-    targetNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    scrollNodeToTop(targetNode, container, 'smooth');
     flashTarget(targetNode);
     return true;
   }
@@ -1525,7 +1603,7 @@
     queueConversationApiLoad();
 
     const domItems = collectItems();
-    const items = mergeApiAndDomItems(state.apiItems, domItems);
+    const items = mergeKnownItemState(mergeApiAndDomItems(state.apiItems, domItems), state.items);
     const oldSig = buildSignature(state.items);
     const newSig = buildSignature(items);
 
@@ -1538,6 +1616,28 @@
     }
 
     updateActiveByViewport();
+  }
+
+  function mergeKnownItemState(items, previousItems) {
+    if (!previousItems.length) return items;
+
+    const previousById = new Map(previousItems.map((item) => [item.id, item]));
+    return items.map((item) => {
+      const previous = previousById.get(item.id);
+      if (!previous) return item;
+
+      return {
+        ...item,
+        node: item.node || (previous.node?.isConnected ? previous.node : null),
+        top: Number.isFinite(item.top)
+          ? item.top
+          : (Number.isFinite(previous.top) ? previous.top : item.top),
+        answerNode: item.answerNode || (previous.answerNode?.isConnected ? previous.answerNode : null),
+        answerTop: Number.isFinite(item.answerTop)
+          ? item.answerTop
+          : (Number.isFinite(previous.answerTop) ? previous.answerTop : item.answerTop),
+      };
+    });
   }
 
   function finishManualRefresh(serial = state.manualRefreshSerial) {

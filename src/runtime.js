@@ -4,7 +4,7 @@
     queueConversationApiLoad();
 
     const domItems = collectItems();
-    const items = mergeApiAndDomItems(state.apiItems, domItems);
+    const items = mergeKnownItemState(mergeApiAndDomItems(state.apiItems, domItems), state.items);
     const oldSig = buildSignature(state.items);
     const newSig = buildSignature(items);
 
@@ -17,6 +17,28 @@
     }
 
     updateActiveByViewport();
+  }
+
+  function mergeKnownItemState(items, previousItems) {
+    if (!previousItems.length) return items;
+
+    const previousById = new Map(previousItems.map((item) => [item.id, item]));
+    return items.map((item) => {
+      const previous = previousById.get(item.id);
+      if (!previous) return item;
+
+      return {
+        ...item,
+        node: item.node || (previous.node?.isConnected ? previous.node : null),
+        top: Number.isFinite(item.top)
+          ? item.top
+          : (Number.isFinite(previous.top) ? previous.top : item.top),
+        answerNode: item.answerNode || (previous.answerNode?.isConnected ? previous.answerNode : null),
+        answerTop: Number.isFinite(item.answerTop)
+          ? item.answerTop
+          : (Number.isFinite(previous.answerTop) ? previous.answerTop : item.answerTop),
+      };
+    });
   }
 
   function finishManualRefresh(serial = state.manualRefreshSerial) {

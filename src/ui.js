@@ -503,8 +503,10 @@
       : '표시할 사용자 질문이 없습니다';
 
     const html = state.filteredItems.length
-      ? state.filteredItems.map((item, idx) => `
-          <div class="item${item.id === state.activeId ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
+      ? state.filteredItems.map((item, idx) => {
+        const isActive = item.id === state.activeId || item.id === state.navigationActiveId;
+        return `
+          <div class="item${isActive ? ' active' : ''}" data-id="${escapeHtml(item.id)}">
             <div class="itemTop">
               <span class="index">Q${idx + 1}</span>
               <div class="itemActions">
@@ -535,7 +537,8 @@
               </div>
             ` : ''}
           </div>
-        `).join('')
+        `;
+      }).join('')
       : `<div class="empty">${emptyMessage}</div>`;
 
     list.innerHTML = html;
@@ -546,10 +549,11 @@
         const item = state.items.find((x) => x.id === id);
         if (!item) return;
 
+        const action = btn.getAttribute('data-action') === 'answer' ? 'answer' : 'question';
         const navigationSerial = beginItemNavigation(id);
 
         try {
-          if (btn.getAttribute('data-action') === 'answer') {
+          if (action === 'answer') {
             await scrollToItemTarget(item, 'answer', navigationSerial);
             return;
           }
@@ -574,6 +578,6 @@
 
     state.els.list.querySelectorAll('.item').forEach((btn) => {
       const id = btn.getAttribute('data-id');
-      btn.classList.toggle('active', id === state.activeId);
+      btn.classList.toggle('active', id === state.activeId || id === state.navigationActiveId);
     });
   }

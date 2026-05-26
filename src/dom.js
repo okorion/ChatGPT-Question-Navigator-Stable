@@ -144,7 +144,12 @@
 
     if (expected && expected.length >= 24) {
       const head = expected.slice(0, 160);
-      return candidate.includes(head) || expected.includes(candidate.slice(0, 160));
+      if (candidate.includes(head)) return true;
+
+      const candidateHead = candidate.slice(0, 160);
+      if (candidateHead.length >= 80 && expected.includes(candidateHead)) {
+        return true;
+      }
     }
 
     return false;
@@ -275,6 +280,7 @@
         pendingItem.answerMessageId = messageId;
         pendingItem.answerText = answerText;
         pendingItem.answerPreview = answerPreview;
+        pendingItem.answerTop = targetNode.getBoundingClientRect().top + window.scrollY;
         pendingItem.searchText = buildSearchText(
           pendingItem.text,
           pendingItem.hasImage,
@@ -309,6 +315,7 @@
         answerMessageId: '',
         answerText: '',
         answerPreview: '',
+        answerTop: Number.POSITIVE_INFINITY,
         searchText: buildSearchText(text, hasImage),
       };
 
@@ -451,6 +458,7 @@
         answerMessageId: answer?.id || '',
         answerText,
         answerPreview,
+        answerTop: Number.POSITIVE_INFINITY,
         searchText: buildSearchText(text, hasImage, answerPreview),
         apiIndex: items.length,
         apiPathIndex: pathIndex,
@@ -507,6 +515,9 @@
         ? findMessageTargetForItem(apiItem, 'answer')
         : domItem?.answerNode || null;
       const answerPreview = apiItem.answerPreview || domItem?.answerPreview || '';
+      const answerTop = Number.isFinite(domItem?.answerTop)
+        ? domItem.answerTop
+        : apiItem.answerTop;
 
       return {
         ...apiItem,
@@ -515,6 +526,7 @@
         top: Number.isFinite(domItem?.top) ? domItem.top : apiItem.top,
         answerNode,
         answerPreview,
+        answerTop,
         searchText: buildSearchText(apiItem.text, apiItem.hasImage, answerPreview),
       };
     });
