@@ -133,6 +133,56 @@
     return roleNode ? getTargetContainer(roleNode) : null;
   }
 
+  function isSameMessageText(candidateText, expectedText, expectedPreview = '') {
+    const candidate = normalizeDomText(candidateText);
+    const expected = normalizeDomText(expectedText);
+    const preview = normalizeDomText(expectedPreview);
+
+    if (!candidate) return false;
+    if (expected && candidate === expected) return true;
+    if (preview && makeDomPreview(candidate) === preview) return true;
+
+    if (expected && expected.length >= 24) {
+      const head = expected.slice(0, 160);
+      return candidate.includes(head) || expected.includes(candidate.slice(0, 160));
+    }
+
+    return false;
+  }
+
+  function findRoleTargetByText(role, expectedText, expectedPreview = '', hasImage = false) {
+    for (const roleNode of getRoleNodes()) {
+      if (roleNode.getAttribute('data-message-author-role') !== role) continue;
+
+      const candidateHasImage = messageHasImage(roleNode);
+      const candidateText = extractRoleText(roleNode, { removeImages: true });
+      if (isSameMessageText(candidateText, expectedText, expectedPreview)) {
+        return getTargetContainer(roleNode);
+      }
+
+      if (hasImage && candidateHasImage && !normalizeDomText(expectedText)) {
+        return getTargetContainer(roleNode);
+      }
+    }
+
+    return null;
+  }
+
+  function findMessageTargetForItem(item, targetKind) {
+    if (!item) return null;
+
+    const isAnswer = targetKind === 'answer';
+    const messageId = isAnswer ? item.answerMessageId : item.messageId;
+    const byId = findMessageTargetById(messageId);
+    if (byId) return byId;
+
+    if (isAnswer) {
+      return findRoleTargetByText('assistant', item.answerText || item.answerPreview, item.answerPreview);
+    }
+
+    return findRoleTargetByText('user', item.text, item.preview, item.hasImage);
+  }
+
   function buildQuestionPreview(text, hasImage, maxLen = 90) {
     const clean = normalizeDomText(text);
     if (!hasImage) return makeDomPreview(clean, maxLen);
@@ -223,6 +273,7 @@
         pendingItem.answerNode = targetNode;
         pendingItem.answerId = messageId || targetId;
         pendingItem.answerMessageId = messageId;
+        pendingItem.answerText = answerText;
         pendingItem.answerPreview = answerPreview;
         pendingItem.searchText = buildSearchText(
           pendingItem.text,
@@ -256,6 +307,7 @@
         answerNode: null,
         answerId: '',
         answerMessageId: '',
+        answerText: '',
         answerPreview: '',
         searchText: buildSearchText(text, hasImage),
       };
@@ -380,6 +432,7 @@
       if (!hasImage && (!text || text.length < 2)) return;
 
       const answer = findNextApiAnswer(path, pathIndex);
+      const answerText = answer?.text || '';
       const answerPreview = answer?.text ? makeDomPreview(pickFirstMeaningfulLine(answer.text)) : '';
       const preview = buildQuestionPreview(text, hasImage);
       const messageId = message.id || node.id;
@@ -396,6 +449,7 @@
         answerNode: null,
         answerId: answer?.id || '',
         answerMessageId: answer?.id || '',
+        answerText,
         answerPreview,
         searchText: buildSearchText(text, hasImage, answerPreview),
         apiIndex: items.length,
@@ -450,14 +504,14 @@
       }
 
       const answerNode = apiItem.answerMessageId
-        ? findMessageTargetById(apiItem.answerMessageId)
+        ? findMessageTargetForItem(apiItem, 'answer')
         : domItem?.answerNode || null;
       const answerPreview = apiItem.answerPreview || domItem?.answerPreview || '';
 
       return {
         ...apiItem,
         domId: domItem?.domId || apiItem.domId,
-        node: domItem?.node || findMessageTargetById(apiItem.messageId),
+        node: domItem?.node || findMessageTargetForItem(apiItem, 'question'),
         top: Number.isFinite(domItem?.top) ? domItem.top : apiItem.top,
         answerNode,
         answerPreview,
