@@ -19,6 +19,14 @@
     scanTimer: null,
     interactionTimer: null,
     activeTimer: null,
+    apiConversationId: '',
+    apiItems: [],
+    apiLoading: false,
+    apiLoaded: false,
+    apiLoadFailed: false,
+    apiRequestSerial: 0,
+    apiRetryCount: 0,
+    apiRetryTimer: null,
   };
 
   function log(...args) {
@@ -70,6 +78,10 @@
         }, remaining);
       }
     };
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function escapeHtml(str) {

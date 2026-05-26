@@ -1,7 +1,10 @@
   function scanAndRender(reason = 'scan') {
     ensureUI();
 
-    const items = collectItems();
+    queueConversationApiLoad();
+
+    const domItems = collectItems();
+    const items = mergeApiAndDomItems(state.apiItems, domItems);
     const oldSig = buildSignature(state.items);
     const newSig = buildSignature(items);
 
@@ -14,6 +17,75 @@
     }
 
     updateActiveByViewport();
+  }
+
+  function resetConversationApiState(conversationId = '') {
+    state.apiConversationId = conversationId;
+    state.apiItems = [];
+    state.apiLoading = false;
+    state.apiLoaded = false;
+    state.apiLoadFailed = false;
+    state.apiRetryCount = 0;
+    clearTimeout(state.apiRetryTimer);
+    state.apiRetryTimer = null;
+    state.apiRequestSerial += 1;
+  }
+
+  function queueConversationApiLoad() {
+    const conversationId = getConversationIdFromUrl();
+
+    if (!conversationId) {
+      if (state.apiConversationId) {
+        resetConversationApiState('');
+      }
+      return;
+    }
+
+    if (state.apiConversationId !== conversationId) {
+      resetConversationApiState(conversationId);
+    }
+
+    if (state.apiLoading || state.apiLoaded || state.apiLoadFailed) return;
+
+    const requestSerial = state.apiRequestSerial;
+    state.apiLoading = true;
+
+    fetchConversationItemsFromApi(conversationId)
+      .then((items) => {
+        if (state.apiConversationId !== conversationId || state.apiRequestSerial !== requestSerial) {
+          return;
+        }
+
+        state.apiItems = items;
+        state.apiLoaded = true;
+        state.apiLoadFailed = false;
+        state.apiRetryCount = 0;
+        scanAndRender('conversation-api');
+      })
+      .catch((error) => {
+        if (state.apiConversationId !== conversationId || state.apiRequestSerial !== requestSerial) {
+          return;
+        }
+
+        state.apiLoadFailed = true;
+        log('conversation api unavailable, using visible DOM only', error);
+
+        if (state.apiRetryCount < 3) {
+          state.apiRetryCount += 1;
+          const retryDelay = 1200 * state.apiRetryCount;
+          clearTimeout(state.apiRetryTimer);
+          state.apiRetryTimer = setTimeout(() => {
+            if (state.apiConversationId !== conversationId || state.apiLoaded) return;
+            state.apiLoadFailed = false;
+            scanAndRender('conversation-api-retry');
+          }, retryDelay);
+        }
+      })
+      .finally(() => {
+        if (state.apiConversationId === conversationId && state.apiRequestSerial === requestSerial) {
+          state.apiLoading = false;
+        }
+      });
   }
 
   const debouncedScan = debounce((reason = 'mutation') => {
@@ -105,6 +177,7 @@
         state.lastUrl = location.href;
         state.activeId = null;
         state.listScrollTop = 0;
+        resetConversationApiState(getConversationIdFromUrl());
         setTimeout(() => {
           scanAndRender('url-change');
           observeConversation();

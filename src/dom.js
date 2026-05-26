@@ -112,6 +112,27 @@
     return id;
   }
 
+  function getMessageId(targetNode, roleNode) {
+    const directId = roleNode?.getAttribute?.('data-message-id') ||
+      targetNode?.getAttribute?.('data-message-id');
+    if (directId) return directId;
+
+    return targetNode?.querySelector?.('[data-message-id]')?.getAttribute('data-message-id') || '';
+  }
+
+  function cssEscapeValue(value) {
+    const raw = String(value || '');
+    if (window.CSS?.escape) return window.CSS.escape(raw);
+    return raw.replace(/["\\]/g, '\\$&');
+  }
+
+  function findMessageTargetById(messageId) {
+    if (!messageId) return null;
+
+    const roleNode = document.querySelector(`[data-message-id="${cssEscapeValue(messageId)}"]`);
+    return roleNode ? getTargetContainer(roleNode) : null;
+  }
+
   function buildQuestionPreview(text, hasImage, maxLen = 90) {
     const clean = normalizeDomText(text);
     if (!hasImage) return makeDomPreview(clean, maxLen);
@@ -188,6 +209,7 @@
       if (!targetNode.isConnected) continue;
 
       const targetId = getOrAssignDomNodeId(targetNode);
+      const messageId = getMessageId(targetNode, roleNode);
       const roleTargetKey = `${role}:${targetId}`;
       if (seenRoleTargets.has(roleTargetKey)) continue;
       seenRoleTargets.add(roleTargetKey);
@@ -199,7 +221,8 @@
         const answerPreview = answerText ? makeDomPreview(pickFirstMeaningfulLine(answerText)) : '';
 
         pendingItem.answerNode = targetNode;
-        pendingItem.answerId = targetId;
+        pendingItem.answerId = messageId || targetId;
+        pendingItem.answerMessageId = messageId;
         pendingItem.answerPreview = answerPreview;
         pendingItem.searchText = buildSearchText(
           pendingItem.text,
@@ -222,7 +245,9 @@
       }
 
       const item = {
-        id: targetId,
+        id: messageId || targetId,
+        domId: targetId,
+        messageId,
         text,
         preview,
         node: targetNode,
@@ -230,6 +255,7 @@
         hasImage,
         answerNode: null,
         answerId: '',
+        answerMessageId: '',
         answerPreview: '',
         searchText: buildSearchText(text, hasImage),
       };
@@ -241,4 +267,204 @@
 
     items.sort((a, b) => a.top - b.top);
     return items;
+  }
+
+  function getConversationIdFromUrl() {
+    const match = location.pathname.match(/\/c\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function isHiddenApiMessage(message) {
+    const metadata = message?.metadata || {};
+    return Boolean(
+      metadata.is_visually_hidden_from_conversation ||
+      metadata.is_user_system_message
+    );
+  }
+
+  function apiPartToText(part) {
+    if (typeof part === 'string') return part;
+    if (!part || typeof part !== 'object') return '';
+    if (typeof part.text === 'string') return part.text;
+    if (typeof part.content === 'string') return part.content;
+    if (typeof part.name === 'string') return part.name;
+    return '';
+  }
+
+  function extractApiMessageText(message) {
+    const content = message?.content;
+    const parts = Array.isArray(content?.parts) ? content.parts : [];
+
+    if (parts.length) {
+      return normalizeDomText(parts.map(apiPartToText).filter(Boolean).join('\n'));
+    }
+
+    return normalizeDomText(apiPartToText(content));
+  }
+
+  function apiPartHasImage(part) {
+    if (!part || typeof part !== 'object') return false;
+
+    const contentType = String(part.content_type || part.type || '');
+    if (contentType.includes('image')) return true;
+    if (typeof part.asset_pointer === 'string' && part.asset_pointer) return true;
+    if (part.image_url || part.image_asset_pointer) return true;
+
+    return false;
+  }
+
+  function apiMessageHasImage(message) {
+    const content = message?.content;
+    const parts = Array.isArray(content?.parts) ? content.parts : [];
+    return parts.some(apiPartHasImage) || apiPartHasImage(content);
+  }
+
+  function buildApiPath(conversationData) {
+    const mapping = conversationData?.mapping || {};
+    const path = [];
+    const seen = new Set();
+    let nodeId = conversationData?.current_node;
+
+    while (nodeId && mapping[nodeId] && !seen.has(nodeId)) {
+      seen.add(nodeId);
+      path.push({
+        id: nodeId,
+        data: mapping[nodeId],
+        message: mapping[nodeId].message,
+      });
+      nodeId = mapping[nodeId].parent;
+    }
+
+    if (path.length) {
+      return path.reverse();
+    }
+
+    return Object.entries(mapping)
+      .map(([id, data]) => ({ id, data, message: data.message }))
+      .filter((node) => node.message)
+      .sort((a, b) => (a.message?.create_time || 0) - (b.message?.create_time || 0));
+  }
+
+  function findNextApiAnswer(path, startIndex) {
+    for (let i = startIndex + 1; i < path.length; i += 1) {
+      const message = path[i].message;
+      const role = message?.author?.role;
+      if (role === 'user') return null;
+      if (role !== 'assistant') continue;
+      if (isHiddenApiMessage(message)) continue;
+
+      const text = extractApiMessageText(message);
+      if (text || apiMessageHasImage(message)) {
+        return {
+          id: path[i].message?.id || path[i].id,
+          pathIndex: i,
+          text,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function buildApiItems(conversationData) {
+    const path = buildApiPath(conversationData);
+    const items = [];
+
+    path.forEach((node, pathIndex) => {
+      const message = node.message;
+      if (message?.author?.role !== 'user') return;
+      if (isHiddenApiMessage(message)) return;
+
+      const hasImage = apiMessageHasImage(message);
+      const text = extractApiMessageText(message);
+      if (!hasImage && (!text || text.length < 2)) return;
+
+      const answer = findNextApiAnswer(path, pathIndex);
+      const answerPreview = answer?.text ? makeDomPreview(pickFirstMeaningfulLine(answer.text)) : '';
+      const preview = buildQuestionPreview(text, hasImage);
+      const messageId = message.id || node.id;
+
+      items.push({
+        id: messageId,
+        messageId,
+        domId: '',
+        text,
+        preview,
+        node: null,
+        top: Number.POSITIVE_INFINITY,
+        hasImage,
+        answerNode: null,
+        answerId: answer?.id || '',
+        answerMessageId: answer?.id || '',
+        answerPreview,
+        searchText: buildSearchText(text, hasImage, answerPreview),
+        apiIndex: items.length,
+        apiPathIndex: pathIndex,
+        answerApiPathIndex: answer?.pathIndex ?? -1,
+      });
+    });
+
+    return items;
+  }
+
+  async function fetchConversationItemsFromApi(conversationId) {
+    const sessionResponse = await fetch('/api/auth/session');
+    if (!sessionResponse.ok) {
+      throw new Error(`session ${sessionResponse.status}`);
+    }
+
+    const session = await sessionResponse.json();
+    const accessToken = session?.accessToken;
+    if (!accessToken) {
+      throw new Error('missing access token');
+    }
+
+    const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`conversation ${response.status}`);
+    }
+
+    return buildApiItems(await response.json());
+  }
+
+  function mergeApiAndDomItems(apiItems, domItems) {
+    if (!apiItems.length) return domItems;
+
+    const domByMessageId = new Map(
+      domItems
+        .filter((item) => item.messageId)
+        .map((item) => [item.messageId, item])
+    );
+    const usedDomIds = new Set();
+
+    const merged = apiItems.map((apiItem) => {
+      const domItem = domByMessageId.get(apiItem.messageId);
+      if (domItem) {
+        usedDomIds.add(domItem.id);
+      }
+
+      const answerNode = apiItem.answerMessageId
+        ? findMessageTargetById(apiItem.answerMessageId)
+        : domItem?.answerNode || null;
+      const answerPreview = apiItem.answerPreview || domItem?.answerPreview || '';
+
+      return {
+        ...apiItem,
+        domId: domItem?.domId || apiItem.domId,
+        node: domItem?.node || findMessageTargetById(apiItem.messageId),
+        top: Number.isFinite(domItem?.top) ? domItem.top : apiItem.top,
+        answerNode,
+        answerPreview,
+        searchText: buildSearchText(apiItem.text, apiItem.hasImage, answerPreview),
+      };
+    });
+
+    const extraDomItems = domItems.filter((item) => !item.messageId || !usedDomIds.has(item.id));
+    return merged.concat(extraDomItems);
   }

@@ -30,13 +30,14 @@
   }
 
   function updateActiveByViewport() {
-    if (!state.items.length) return;
+    const positionedItems = state.items.filter((item) => Number.isFinite(item.top));
+    if (!positionedItems.length) return;
     if (state.activeTimer) return;
 
     const currentY = window.scrollY + window.innerHeight * 0.28;
-    let active = state.items[0];
+    let active = positionedItems[0];
 
-    for (const item of state.items) {
+    for (const item of positionedItems) {
       if (item.top <= currentY) active = item;
       else break;
     }
@@ -45,6 +46,65 @@
       state.activeId = active.id;
       updateActiveClassOnly();
     }
+  }
+
+  function buildScrollProbePositions(item, targetKind) {
+    const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    if (!maxY) return [0];
+
+    const total = Math.max(1, state.items.length - 1);
+    const itemIndex = Math.max(0, state.items.indexOf(item));
+    const answerOffset = targetKind === 'answer' ? 0.45 : 0;
+    const ratio = Math.min(1, Math.max(0, (itemIndex + answerOffset) / total));
+    const candidates = new Set();
+
+    [
+      ratio,
+      ratio - 0.04,
+      ratio + 0.04,
+      ratio - 0.1,
+      ratio + 0.1,
+      ratio - 0.18,
+      ratio + 0.18,
+    ].forEach((value) => {
+      candidates.add(Math.round(maxY * Math.min(1, Math.max(0, value))));
+    });
+
+    for (let i = 0; i <= 24; i += 1) {
+      candidates.add(Math.round(maxY * (i / 24)));
+    }
+
+    return Array.from(candidates);
+  }
+
+  async function revealMessageTarget(messageId, item, targetKind) {
+    if (!messageId) return null;
+
+    const current = findMessageTargetById(messageId);
+    if (current) return current;
+
+    for (const top of buildScrollProbePositions(item, targetKind)) {
+      window.scrollTo({ top, behavior: 'auto' });
+      await wait(90);
+
+      const node = findMessageTargetById(messageId);
+      if (node) return node;
+    }
+
+    return null;
+  }
+
+  async function scrollToItemTarget(item, targetKind) {
+    const isAnswer = targetKind === 'answer';
+    const messageId = isAnswer ? item.answerMessageId : item.messageId;
+    const fallbackNode = isAnswer ? item.answerNode : item.node;
+    const targetNode = fallbackNode || await revealMessageTarget(messageId, item, targetKind);
+
+    if (!targetNode) return false;
+
+    targetNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    flashTarget(targetNode);
+    return true;
   }
 
   const throttledActiveUpdate = throttle(updateActiveByViewport, 120);

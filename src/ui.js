@@ -406,8 +406,8 @@
                   data-action="answer"
                   data-id="${escapeHtml(item.id)}"
                   type="button"
-                  title="${escapeHtml(item.answerNode ? (item.answerPreview || '해당 답변으로 이동') : '아직 답변이 없습니다')}"
-                  ${item.answerNode ? '' : 'disabled'}
+                  title="${escapeHtml((item.answerNode || item.answerMessageId) ? (item.answerPreview || '해당 답변으로 이동') : '아직 답변이 없습니다')}"
+                  ${item.answerNode || item.answerMessageId ? '' : 'disabled'}
                 >
                   답변
                 </button>
@@ -434,7 +434,7 @@
     list.innerHTML = html;
 
     list.querySelectorAll('[data-action]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-id');
         const item = state.items.find((x) => x.id === id);
         if (!item) return;
@@ -443,15 +443,11 @@
         updateActiveClassOnly();
 
         if (btn.getAttribute('data-action') === 'answer') {
-          if (!item.answerNode) return;
-          item.answerNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          flashTarget(item.answerNode);
+          await scrollToItemTarget(item, 'answer');
           return;
         }
 
-        if (!item.node) return;
-        item.node.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        flashTarget(item.node);
+        await scrollToItemTarget(item, 'question');
       });
     });
 

@@ -36,6 +36,14 @@
     scanTimer: null,
     interactionTimer: null,
     activeTimer: null,
+    apiConversationId: '',
+    apiItems: [],
+    apiLoading: false,
+    apiLoaded: false,
+    apiLoadFailed: false,
+    apiRequestSerial: 0,
+    apiRetryCount: 0,
+    apiRetryTimer: null,
   };
 
   function log(...args) {
@@ -87,6 +95,10 @@
         }, remaining);
       }
     };
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function escapeHtml(str) {
@@ -240,6 +252,27 @@
     return id;
   }
 
+  function getMessageId(targetNode, roleNode) {
+    const directId = roleNode?.getAttribute?.('data-message-id') ||
+      targetNode?.getAttribute?.('data-message-id');
+    if (directId) return directId;
+
+    return targetNode?.querySelector?.('[data-message-id]')?.getAttribute('data-message-id') || '';
+  }
+
+  function cssEscapeValue(value) {
+    const raw = String(value || '');
+    if (window.CSS?.escape) return window.CSS.escape(raw);
+    return raw.replace(/["\\]/g, '\\$&');
+  }
+
+  function findMessageTargetById(messageId) {
+    if (!messageId) return null;
+
+    const roleNode = document.querySelector(`[data-message-id="${cssEscapeValue(messageId)}"]`);
+    return roleNode ? getTargetContainer(roleNode) : null;
+  }
+
   function buildQuestionPreview(text, hasImage, maxLen = 90) {
     const clean = normalizeDomText(text);
     if (!hasImage) return makeDomPreview(clean, maxLen);
@@ -316,6 +349,7 @@
       if (!targetNode.isConnected) continue;
 
       const targetId = getOrAssignDomNodeId(targetNode);
+      const messageId = getMessageId(targetNode, roleNode);
       const roleTargetKey = `${role}:${targetId}`;
       if (seenRoleTargets.has(roleTargetKey)) continue;
       seenRoleTargets.add(roleTargetKey);
@@ -327,7 +361,8 @@
         const answerPreview = answerText ? makeDomPreview(pickFirstMeaningfulLine(answerText)) : '';
 
         pendingItem.answerNode = targetNode;
-        pendingItem.answerId = targetId;
+        pendingItem.answerId = messageId || targetId;
+        pendingItem.answerMessageId = messageId;
         pendingItem.answerPreview = answerPreview;
         pendingItem.searchText = buildSearchText(
           pendingItem.text,
@@ -350,7 +385,9 @@
       }
 
       const item = {
-        id: targetId,
+        id: messageId || targetId,
+        domId: targetId,
+        messageId,
         text,
         preview,
         node: targetNode,
@@ -358,6 +395,7 @@
         hasImage,
         answerNode: null,
         answerId: '',
+        answerMessageId: '',
         answerPreview: '',
         searchText: buildSearchText(text, hasImage),
       };
@@ -369,6 +407,206 @@
 
     items.sort((a, b) => a.top - b.top);
     return items;
+  }
+
+  function getConversationIdFromUrl() {
+    const match = location.pathname.match(/\/c\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function isHiddenApiMessage(message) {
+    const metadata = message?.metadata || {};
+    return Boolean(
+      metadata.is_visually_hidden_from_conversation ||
+      metadata.is_user_system_message
+    );
+  }
+
+  function apiPartToText(part) {
+    if (typeof part === 'string') return part;
+    if (!part || typeof part !== 'object') return '';
+    if (typeof part.text === 'string') return part.text;
+    if (typeof part.content === 'string') return part.content;
+    if (typeof part.name === 'string') return part.name;
+    return '';
+  }
+
+  function extractApiMessageText(message) {
+    const content = message?.content;
+    const parts = Array.isArray(content?.parts) ? content.parts : [];
+
+    if (parts.length) {
+      return normalizeDomText(parts.map(apiPartToText).filter(Boolean).join('\n'));
+    }
+
+    return normalizeDomText(apiPartToText(content));
+  }
+
+  function apiPartHasImage(part) {
+    if (!part || typeof part !== 'object') return false;
+
+    const contentType = String(part.content_type || part.type || '');
+    if (contentType.includes('image')) return true;
+    if (typeof part.asset_pointer === 'string' && part.asset_pointer) return true;
+    if (part.image_url || part.image_asset_pointer) return true;
+
+    return false;
+  }
+
+  function apiMessageHasImage(message) {
+    const content = message?.content;
+    const parts = Array.isArray(content?.parts) ? content.parts : [];
+    return parts.some(apiPartHasImage) || apiPartHasImage(content);
+  }
+
+  function buildApiPath(conversationData) {
+    const mapping = conversationData?.mapping || {};
+    const path = [];
+    const seen = new Set();
+    let nodeId = conversationData?.current_node;
+
+    while (nodeId && mapping[nodeId] && !seen.has(nodeId)) {
+      seen.add(nodeId);
+      path.push({
+        id: nodeId,
+        data: mapping[nodeId],
+        message: mapping[nodeId].message,
+      });
+      nodeId = mapping[nodeId].parent;
+    }
+
+    if (path.length) {
+      return path.reverse();
+    }
+
+    return Object.entries(mapping)
+      .map(([id, data]) => ({ id, data, message: data.message }))
+      .filter((node) => node.message)
+      .sort((a, b) => (a.message?.create_time || 0) - (b.message?.create_time || 0));
+  }
+
+  function findNextApiAnswer(path, startIndex) {
+    for (let i = startIndex + 1; i < path.length; i += 1) {
+      const message = path[i].message;
+      const role = message?.author?.role;
+      if (role === 'user') return null;
+      if (role !== 'assistant') continue;
+      if (isHiddenApiMessage(message)) continue;
+
+      const text = extractApiMessageText(message);
+      if (text || apiMessageHasImage(message)) {
+        return {
+          id: path[i].message?.id || path[i].id,
+          pathIndex: i,
+          text,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function buildApiItems(conversationData) {
+    const path = buildApiPath(conversationData);
+    const items = [];
+
+    path.forEach((node, pathIndex) => {
+      const message = node.message;
+      if (message?.author?.role !== 'user') return;
+      if (isHiddenApiMessage(message)) return;
+
+      const hasImage = apiMessageHasImage(message);
+      const text = extractApiMessageText(message);
+      if (!hasImage && (!text || text.length < 2)) return;
+
+      const answer = findNextApiAnswer(path, pathIndex);
+      const answerPreview = answer?.text ? makeDomPreview(pickFirstMeaningfulLine(answer.text)) : '';
+      const preview = buildQuestionPreview(text, hasImage);
+      const messageId = message.id || node.id;
+
+      items.push({
+        id: messageId,
+        messageId,
+        domId: '',
+        text,
+        preview,
+        node: null,
+        top: Number.POSITIVE_INFINITY,
+        hasImage,
+        answerNode: null,
+        answerId: answer?.id || '',
+        answerMessageId: answer?.id || '',
+        answerPreview,
+        searchText: buildSearchText(text, hasImage, answerPreview),
+        apiIndex: items.length,
+        apiPathIndex: pathIndex,
+        answerApiPathIndex: answer?.pathIndex ?? -1,
+      });
+    });
+
+    return items;
+  }
+
+  async function fetchConversationItemsFromApi(conversationId) {
+    const sessionResponse = await fetch('/api/auth/session');
+    if (!sessionResponse.ok) {
+      throw new Error(`session ${sessionResponse.status}`);
+    }
+
+    const session = await sessionResponse.json();
+    const accessToken = session?.accessToken;
+    if (!accessToken) {
+      throw new Error('missing access token');
+    }
+
+    const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`conversation ${response.status}`);
+    }
+
+    return buildApiItems(await response.json());
+  }
+
+  function mergeApiAndDomItems(apiItems, domItems) {
+    if (!apiItems.length) return domItems;
+
+    const domByMessageId = new Map(
+      domItems
+        .filter((item) => item.messageId)
+        .map((item) => [item.messageId, item])
+    );
+    const usedDomIds = new Set();
+
+    const merged = apiItems.map((apiItem) => {
+      const domItem = domByMessageId.get(apiItem.messageId);
+      if (domItem) {
+        usedDomIds.add(domItem.id);
+      }
+
+      const answerNode = apiItem.answerMessageId
+        ? findMessageTargetById(apiItem.answerMessageId)
+        : domItem?.answerNode || null;
+      const answerPreview = apiItem.answerPreview || domItem?.answerPreview || '';
+
+      return {
+        ...apiItem,
+        domId: domItem?.domId || apiItem.domId,
+        node: domItem?.node || findMessageTargetById(apiItem.messageId),
+        top: Number.isFinite(domItem?.top) ? domItem.top : apiItem.top,
+        answerNode,
+        answerPreview,
+        searchText: buildSearchText(apiItem.text, apiItem.hasImage, answerPreview),
+      };
+    });
+
+    const extraDomItems = domItems.filter((item) => !item.messageId || !usedDomIds.has(item.id));
+    return merged.concat(extraDomItems);
   }
 
   function ensureUI() {
@@ -779,8 +1017,8 @@
                   data-action="answer"
                   data-id="${escapeHtml(item.id)}"
                   type="button"
-                  title="${escapeHtml(item.answerNode ? (item.answerPreview || '해당 답변으로 이동') : '아직 답변이 없습니다')}"
-                  ${item.answerNode ? '' : 'disabled'}
+                  title="${escapeHtml((item.answerNode || item.answerMessageId) ? (item.answerPreview || '해당 답변으로 이동') : '아직 답변이 없습니다')}"
+                  ${item.answerNode || item.answerMessageId ? '' : 'disabled'}
                 >
                   답변
                 </button>
@@ -807,7 +1045,7 @@
     list.innerHTML = html;
 
     list.querySelectorAll('[data-action]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-id');
         const item = state.items.find((x) => x.id === id);
         if (!item) return;
@@ -816,15 +1054,11 @@
         updateActiveClassOnly();
 
         if (btn.getAttribute('data-action') === 'answer') {
-          if (!item.answerNode) return;
-          item.answerNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          flashTarget(item.answerNode);
+          await scrollToItemTarget(item, 'answer');
           return;
         }
 
-        if (!item.node) return;
-        item.node.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        flashTarget(item.node);
+        await scrollToItemTarget(item, 'question');
       });
     });
 
@@ -877,13 +1111,14 @@
   }
 
   function updateActiveByViewport() {
-    if (!state.items.length) return;
+    const positionedItems = state.items.filter((item) => Number.isFinite(item.top));
+    if (!positionedItems.length) return;
     if (state.activeTimer) return;
 
     const currentY = window.scrollY + window.innerHeight * 0.28;
-    let active = state.items[0];
+    let active = positionedItems[0];
 
-    for (const item of state.items) {
+    for (const item of positionedItems) {
       if (item.top <= currentY) active = item;
       else break;
     }
@@ -894,12 +1129,74 @@
     }
   }
 
+  function buildScrollProbePositions(item, targetKind) {
+    const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    if (!maxY) return [0];
+
+    const total = Math.max(1, state.items.length - 1);
+    const itemIndex = Math.max(0, state.items.indexOf(item));
+    const answerOffset = targetKind === 'answer' ? 0.45 : 0;
+    const ratio = Math.min(1, Math.max(0, (itemIndex + answerOffset) / total));
+    const candidates = new Set();
+
+    [
+      ratio,
+      ratio - 0.04,
+      ratio + 0.04,
+      ratio - 0.1,
+      ratio + 0.1,
+      ratio - 0.18,
+      ratio + 0.18,
+    ].forEach((value) => {
+      candidates.add(Math.round(maxY * Math.min(1, Math.max(0, value))));
+    });
+
+    for (let i = 0; i <= 24; i += 1) {
+      candidates.add(Math.round(maxY * (i / 24)));
+    }
+
+    return Array.from(candidates);
+  }
+
+  async function revealMessageTarget(messageId, item, targetKind) {
+    if (!messageId) return null;
+
+    const current = findMessageTargetById(messageId);
+    if (current) return current;
+
+    for (const top of buildScrollProbePositions(item, targetKind)) {
+      window.scrollTo({ top, behavior: 'auto' });
+      await wait(90);
+
+      const node = findMessageTargetById(messageId);
+      if (node) return node;
+    }
+
+    return null;
+  }
+
+  async function scrollToItemTarget(item, targetKind) {
+    const isAnswer = targetKind === 'answer';
+    const messageId = isAnswer ? item.answerMessageId : item.messageId;
+    const fallbackNode = isAnswer ? item.answerNode : item.node;
+    const targetNode = fallbackNode || await revealMessageTarget(messageId, item, targetKind);
+
+    if (!targetNode) return false;
+
+    targetNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    flashTarget(targetNode);
+    return true;
+  }
+
   const throttledActiveUpdate = throttle(updateActiveByViewport, 120);
 
   function scanAndRender(reason = 'scan') {
     ensureUI();
 
-    const items = collectItems();
+    queueConversationApiLoad();
+
+    const domItems = collectItems();
+    const items = mergeApiAndDomItems(state.apiItems, domItems);
     const oldSig = buildSignature(state.items);
     const newSig = buildSignature(items);
 
@@ -912,6 +1209,75 @@
     }
 
     updateActiveByViewport();
+  }
+
+  function resetConversationApiState(conversationId = '') {
+    state.apiConversationId = conversationId;
+    state.apiItems = [];
+    state.apiLoading = false;
+    state.apiLoaded = false;
+    state.apiLoadFailed = false;
+    state.apiRetryCount = 0;
+    clearTimeout(state.apiRetryTimer);
+    state.apiRetryTimer = null;
+    state.apiRequestSerial += 1;
+  }
+
+  function queueConversationApiLoad() {
+    const conversationId = getConversationIdFromUrl();
+
+    if (!conversationId) {
+      if (state.apiConversationId) {
+        resetConversationApiState('');
+      }
+      return;
+    }
+
+    if (state.apiConversationId !== conversationId) {
+      resetConversationApiState(conversationId);
+    }
+
+    if (state.apiLoading || state.apiLoaded || state.apiLoadFailed) return;
+
+    const requestSerial = state.apiRequestSerial;
+    state.apiLoading = true;
+
+    fetchConversationItemsFromApi(conversationId)
+      .then((items) => {
+        if (state.apiConversationId !== conversationId || state.apiRequestSerial !== requestSerial) {
+          return;
+        }
+
+        state.apiItems = items;
+        state.apiLoaded = true;
+        state.apiLoadFailed = false;
+        state.apiRetryCount = 0;
+        scanAndRender('conversation-api');
+      })
+      .catch((error) => {
+        if (state.apiConversationId !== conversationId || state.apiRequestSerial !== requestSerial) {
+          return;
+        }
+
+        state.apiLoadFailed = true;
+        log('conversation api unavailable, using visible DOM only', error);
+
+        if (state.apiRetryCount < 3) {
+          state.apiRetryCount += 1;
+          const retryDelay = 1200 * state.apiRetryCount;
+          clearTimeout(state.apiRetryTimer);
+          state.apiRetryTimer = setTimeout(() => {
+            if (state.apiConversationId !== conversationId || state.apiLoaded) return;
+            state.apiLoadFailed = false;
+            scanAndRender('conversation-api-retry');
+          }, retryDelay);
+        }
+      })
+      .finally(() => {
+        if (state.apiConversationId === conversationId && state.apiRequestSerial === requestSerial) {
+          state.apiLoading = false;
+        }
+      });
   }
 
   const debouncedScan = debounce((reason = 'mutation') => {
@@ -1003,6 +1369,7 @@
         state.lastUrl = location.href;
         state.activeId = null;
         state.listScrollTop = 0;
+        resetConversationApiState(getConversationIdFromUrl());
         setTimeout(() => {
           scanAndRender('url-change');
           observeConversation();
